@@ -8,7 +8,7 @@ on:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
     
     steps:
     - uses: actions/checkout@v4
@@ -20,8 +20,7 @@ jobs:
     
     - name: Install dependencies
       run: |
-        pip install --quiet requests feedparser groq google-auth google-auth-oauthlib google-api-python-client
+        pip install requests feedparser groq google-auth google-auth-oauthlib google-api-python-client
     
     - name: Run News Bot
-      timeout-minutes: 25
-      run: python auto-news-bot.py
+      run: python github_bot.py
