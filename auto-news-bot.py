@@ -445,7 +445,7 @@ def post_to_blogger(service, title, content, images, source, keywords, meta_desc
         h2 {{ font-size: 28px; margin: 40px 0 20px 0; border-bottom: 3px solid #1a73e8; padding-bottom: 10px; color: #000; }}
         h3 {{ font-size: 22px; margin: 30px 0 15px 0; color: #1a1a1a; }}
         .meta {{ color: #666; font-size: 14px; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; flex-wrap: wrap; }}
-        .article-content p {{ margin-bottom: 25px; text-align: left; }}
+        .article-content p {{ margin-bottom: 25px; text-align: justify; }}
         .article-content ul, .article-content ol {{ margin: 20px 0 25px 40px; }}
         .article-content li {{ margin: 8px 0; }}
         .faq-q {{ font-weight: bold; margin: 30px 0 10px 0; font-size: 18px; color: #1a73e8; }}
