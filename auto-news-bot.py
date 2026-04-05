@@ -4,8 +4,6 @@ import time
 import os
 import json
 import re
-import signal
-import sys
 from datetime import datetime
 from groq import Groq
 from google.auth.transport.requests import Request
@@ -95,7 +93,7 @@ def fetch_news():
     else:
         print(f"   📭 No new stories")
     
-    # FIX: Sirf 1 news lete hain (hang hone se bachne ke liye)
+    # SIRF EK NAYI NEWS - DUPLICATE SE BACHNE KE LIYE
     return unique[:1]
 
 def get_images(title):
@@ -191,7 +189,7 @@ Answer here.
 (2 paragraphs)
 
 RULES:
-- Write 800-1000 words (shorter for stability)
+- Write 800-1000 words (stable for GitHub)
 - Each paragraph 2-3 sentences
 - Blank line between paragraphs
 - No placeholders
@@ -341,7 +339,7 @@ def check_and_post():
     
     processed = load_processed()
     
-    # Sirf 1 article process karo (hang hone se bachne ke liye)
+    # SIRF EK ARTICLE PER RUN - HANG NAHI HOGA
     for article in articles[:1]:
         story_id = article['title'][:60]
         if story_id in processed:
@@ -366,8 +364,8 @@ def check_and_post():
             save_processed(processed)
             print(f"   ✅ Published successfully!")
         
-        print(f"\n   🏁 Done with this run. Next run will check for more news.")
-        return  # Exit after 1 post
+        print(f"\n   🏁 Done with this run.")
+        return  # EK POST KE BAAD EXIT
 
 def run():
     print("""
@@ -378,6 +376,7 @@ def run():
     ║   ✓ 800-1000 words per article                             ║
     ║   ✓ Auto-posts when news found                             ║
     ║   ✓ Runs every 30 minutes on GitHub                        ║
+    ║   ✓ NO duplicate posts (processed_news.json commit)        ║
     ╚══════════════════════════════════════════════════════════════╝
     """)
     
