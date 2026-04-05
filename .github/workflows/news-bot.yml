@@ -8,7 +8,7 @@ on:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15  # 15 minute kaafi hai ab
     
     steps:
     - uses: actions/checkout@v4
@@ -19,9 +19,7 @@ jobs:
         python-version: '3.11'
     
     - name: Install dependencies
-      run: |
-        pip install requests feedparser groq google-auth google-auth-oauthlib google-api-python-client
+      run: pip install requests feedparser groq google-auth google-auth-oauthlib google-api-python-client
     
     - name: Run News Bot
-      timeout-minutes: 25
       run: python auto-news-bot.py
