@@ -22,20 +22,6 @@ PEXELS_API_KEY = "u6bM6qc8OrJn3i4hLakLPVnHduO1KsSoguJExJRZcaOMUmhR7xAYZ8A9"
 
 client = Groq(api_key=GROQ_API_KEY)
 PROCESSED_FILE = "processed_news.json"
-running = True
-
-def signal_handler(sig, frame):
-    global running
-    print("\n\n🛑 Bot stopping gracefully...")
-    running = False
-    sys.exit(0)
-
-signal.signal(signal.SIGINT, signal_handler)
-
-RSS_FEEDS = [
-    'http://feeds.bbci.co.uk/news/world/rss.xml',
-    'https://www.aljazeera.com/xml/rss/all.xml',
-]
 
 def load_processed():
     if os.path.exists(PROCESSED_FILE):
@@ -70,10 +56,15 @@ def fetch_news():
     processed = load_processed()
     print("   📡 Checking RSS feeds...")
     
+    RSS_FEEDS = [
+        'http://feeds.bbci.co.uk/news/world/rss.xml',
+        'https://www.aljazeera.com/xml/rss/all.xml',
+    ]
+    
     for feed_url in RSS_FEEDS:
         try:
             feed = feedparser.parse(feed_url)
-            for entry in feed.entries[:2]:
+            for entry in feed.entries[:3]:
                 title = entry.get('title', '').strip()
                 link = entry.get('link', '')
                 description = entry.get('summary', '')[:200]
@@ -102,9 +93,10 @@ def fetch_news():
     if unique:
         print(f"   ✅ Found {len(unique)} new stories")
     else:
-        print(f"   📭 No new stories (checked {len(RSS_FEEDS)} feeds)")
+        print(f"   📭 No new stories")
     
-    return unique[:2]
+    # FIX: Sirf 1 news lete hain (hang hone se bachne ke liye)
+    return unique[:1]
 
 def get_images(title):
     images = []
@@ -199,7 +191,7 @@ Answer here.
 (2 paragraphs)
 
 RULES:
-- Write 1500-1800 words
+- Write 800-1000 words (shorter for stability)
 - Each paragraph 2-3 sentences
 - Blank line between paragraphs
 - No placeholders
@@ -210,7 +202,7 @@ Write now:"""
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
-            timeout=120
+            timeout=90
         )
         article = response.choices[0].message.content
         article = re.sub(r'^#.*$', '', article, flags=re.MULTILINE)
@@ -247,7 +239,7 @@ def create_json_ld(title, description, keywords, current_url):
 def post_to_blogger(service, title, content, images, source, keywords):
     current_date = datetime.now().strftime("%B %d, %Y")
     word_count = len(content.split())
-    reading_time = max(6, round(word_count / 200))
+    reading_time = max(4, round(word_count / 200))
     clean_title = title.replace('<', '&lt;').replace('>', '&gt;')
     
     slug = re.sub(r'[^a-z0-9]+', '-', clean_title.lower())[:50]
@@ -348,9 +340,12 @@ def check_and_post():
         return
     
     processed = load_processed()
-    for article in articles:
+    
+    # Sirf 1 article process karo (hang hone se bachne ke liye)
+    for article in articles[:1]:
         story_id = article['title'][:60]
         if story_id in processed:
+            print(f"   ⏭️ Already processed: {article['title'][:50]}...")
             continue
         
         print(f"\n📰 New: {article['title'][:55]}...")
@@ -369,33 +364,28 @@ def check_and_post():
             post_to_blogger(service, article['title'], content, images, article['source'], keywords)
             processed.add(story_id)
             save_processed(processed)
-            print(f"   ✅ Published!")
-        time.sleep(15)
-    
-    print(f"\n📊 Total: {len(processed)}")
+            print(f"   ✅ Published successfully!")
+        
+        print(f"\n   🏁 Done with this run. Next run will check for more news.")
+        return  # Exit after 1 post
 
 def run():
     print("""
     ╔══════════════════════════════════════════════════════════════╗
     ║   📰 FINAL NEWS BOT - STABLE VERSION                        ║
     ║                                                              ║
-    ║   ✓ Runs continuously until Ctrl+C                         ║
-    ║   ✓ Checks news every 15 minutes                           ║
+    ║   ✓ Single post per run (no hang)                          ║
+    ║   ✓ 800-1000 words per article                             ║
     ║   ✓ Auto-posts when news found                             ║
-    ║   ✓ Press Ctrl+C once to stop (no traceback)               ║
+    ║   ✓ Runs every 30 minutes on GitHub                        ║
     ╚══════════════════════════════════════════════════════════════╝
     """)
     
-    print("✅ Bot is RUNNING")
-    print("⏰ Checking for news every 15 minutes")
-    print("📝 Will auto-post when news found")
-    print("🛑 Press Ctrl+C once to stop\n")
+    print("✅ Bot is RUNNING on GitHub Actions")
+    print("⏰ Checking for news (1 post per run)")
+    print("📝 Will auto-post when news found\n")
     
     check_and_post()
-    while running:
-        print(f"\n💤 Next check in 15 minutes...")
-        time.sleep(900)  # 15 minutes
-        check_and_post()
 
 if __name__ == "__main__":
     run()
