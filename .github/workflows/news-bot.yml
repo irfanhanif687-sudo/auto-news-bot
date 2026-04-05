@@ -8,18 +8,27 @@ on:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 15  # 15 minute kaafi hai ab
-    
+    timeout-minutes: 15
+
     steps:
-    - uses: actions/checkout@v4
-    
+    - name: Checkout code
+      uses: actions/checkout@v4
+
     - name: Setup Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-    
+
     - name: Install dependencies
       run: pip install requests feedparser groq google-auth google-auth-oauthlib google-api-python-client
-    
+
     - name: Run News Bot
       run: python auto-news-bot.py
+
+    - name: Commit and push processed news file
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add processed_news.json
+        git diff --quiet && git diff --staged --quiet || git commit -m "Update processed news records"
+        git push
