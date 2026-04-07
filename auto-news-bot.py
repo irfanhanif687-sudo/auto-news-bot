@@ -72,6 +72,7 @@ def fetch_news():
                 description = entry.get('summary', '')[:400]
                 description = re.sub(r'<[^>]+>', '', description)
                 
+                # Skip unwanted topics
                 skip_words = ['beer', 'balloon', 'mortgage', 'recipe', 'cook', 'celebrity', 'gossip', 'student loan']
                 if any(word in title.lower() for word in skip_words):
                     continue
@@ -88,6 +89,7 @@ def fetch_news():
         except Exception as e:
             print(f"      ⚠️ Feed error: {e}")
     
+    # Remove duplicates
     seen = set()
     unique = []
     for a in articles:
@@ -136,35 +138,34 @@ def get_images(title):
     return images[:2]
 
 def write_human_article(title, description, source, retry_count=0):
-    """Humanised article - real journalist style"""
+    """Humanised article - real journalist style, no placeholders"""
     current_date = datetime.now().strftime("%B %d, %Y")
     
-    prompt = f"""Write a news article like a real journalist. Make it human, specific, and detailed.
+    prompt = f"""Write a complete news article. Make it sound like a real journalist wrote it.
 
 TITLE: {title}
 DATE: {current_date}
 SOURCE: {source}
 CONTEXT: {description[:400]}
 
-REQUIREMENTS:
+IMPORTANT RULES:
 - Write 600-1000 words
-- Add specific details (times, locations, names if possible)
-- Include realistic quotes from witnesses, officials, or experts
-- Write short sentences, vary the length
-- Use active voice
+- NO placeholders like [LOCATION] or [DATE]
+- Use specific details from the context
+- Add realistic quotes from witnesses, officials, or experts
+- Write short sentences (15-25 words)
 - Start with a strong opening paragraph
-- End naturally (no "in conclusion")
-- NO placeholders like [LOCATION] - use real info or leave out
-- NO generic phrases like "major developing story"
+- End naturally - no "in conclusion"
+- Sound human, not like AI
 
-STRUCTURE:
-1. Opening paragraph: What happened, where, when
+STRUCTURE TO FOLLOW:
+1. Opening: What happened, where, when
 2. Details: What we know so far
-3. Witness/official quotes: What people are saying
+3. Quotes: What people are saying
 4. Context: Why this matters
 5. What happens next
 
-Write naturally. Be specific. Sound human:"""
+Write the complete article now:"""
 
     try:
         print(f"   ✍️ Writing article (attempt {retry_count + 1})...")
@@ -178,8 +179,8 @@ Write naturally. Be specific. Sound human:"""
         word_count = len(article.split())
         print(f"   📊 Word count: {word_count}")
         
-        # Check for placeholders - agar placeholder hai to retry
-        if ('[LOCATION]' in article or '[DATE]' in article or '[DAY]' in article) and retry_count < 2:
+        # Check for placeholders
+        if ('[LOCATION]' in article or '[DATE]' in article or '[DAY]' in article or '[TIME]' in article) and retry_count < 2:
             print(f"   ⚠️ Found placeholders, retrying...")
             time.sleep(5)
             return write_human_article(title, description, source, retry_count + 1)
@@ -188,6 +189,9 @@ Write naturally. Be specific. Sound human:"""
             print(f"   ⚠️ Too short ({word_count} words), retrying...")
             time.sleep(5)
             return write_human_article(title, description, source, retry_count + 1)
+        
+        if word_count < 200:
+            return get_human_fallback(title, description)
         
         return article
         
@@ -200,22 +204,20 @@ Write naturally. Be specific. Sound human:"""
         return get_human_fallback(title, description)
 
 def get_human_fallback(title, description):
-    """Clean fallback - NO PLACEHOLDERS"""
-    # Extract key words from title
-    words = title.split()
-    main_topic = ' '.join(words[:5]) if len(words) > 5 else title
-    
-    return f"""<p><strong>{main_topic}</strong> - Here's what we know based on initial reports from authorities.</p>
+    """Clean fallback - NO PLACEHOLDERS at all"""
+    return f"""<p>Here's what we know so far about this developing story.</p>
 
-<p>Local officials have confirmed they are responding to this incident. Emergency services arrived at the scene and investigations are underway to determine the full circumstances.</p>
+<p>According to initial reports from officials and local authorities, this incident has occurred and is currently under active investigation.</p>
 
-<p>"Our teams are on the ground and working to gather all the facts," a spokesperson told local media. "We will provide updates as more information becomes available."</p>
+<p>"Our teams are on the scene and working to gather all the facts," a spokesperson told local media. "We will provide updates as more information becomes available to us."</p>
 
-<p>Witnesses in the area described hearing loud noises and seeing emergency vehicles rush to the location. "It happened very suddenly," one person who was nearby said. "Everyone was shocked by what they saw."</p>
+<p>Witnesses in the area described hearing loud noises and seeing emergency vehicles responding quickly. "It happened very suddenly," one person who was nearby said. "Everyone was shocked by what they saw unfold before them."</p>
 
-<p>This remains a developing situation. Authorities are asking people to avoid the area while the investigation continues. We will update this article when officials release additional details.</p>
+<p>Local authorities have asked people to avoid the area while the investigation continues. Emergency services remain at the location.</p>
 
-<p>The incident is being treated seriously by local law enforcement. Further information is expected to be released in the coming hours.</p>"""
+<p>This remains a developing situation. We will update this article when officials release additional details to the public.</p>
+
+<p>The incident is being treated seriously by law enforcement. Further information is expected to be released in the coming hours as the investigation progresses.</p>"""
 
 def post_to_blogger(service, title, content, images, source):
     current_date = datetime.now().strftime("%B %d, %Y")
@@ -223,9 +225,11 @@ def post_to_blogger(service, title, content, images, source):
     reading_time = max(4, round(word_count / 200))
     clean_title = title.replace('<', '&lt;').replace('>', '&gt;')
     
+    # Create SEO-friendly slug
     slug = re.sub(r'[^a-z0-9]+', '-', clean_title.lower())[:60]
     current_url = f"https://newnews4public.blogspot.com/{datetime.now().year}/{datetime.now().month}/{slug}.html"
     
+    # Images HTML
     images_html = ""
     for img in images:
         images_html += f'''
@@ -235,14 +239,18 @@ def post_to_blogger(service, title, content, images, source):
         </figure>
         '''
     
+    # Process content
     content_html = content.replace('\n\n', '</p><p>')
     content_html = f'<p>{content_html}</p>'
     content_html = content_html.replace('<p><h2>', '<h2>').replace('</h2></p>', '</h2>')
     content_html = content_html.replace('<p><h3>', '<h3>').replace('</h3></p>', '</h3>')
     
+    # Categories
     categories = ['World News']
-    if any(word in title.lower() for word in ['iran', 'israel', 'trump', 'us', 'china', 'russia', 'ukraine', 'gaza', 'lebanon', 'turkey', 'france']):
+    if any(word in title.lower() for word in ['iran', 'israel', 'trump', 'us', 'china', 'russia', 'ukraine', 'gaza', 'lebanon', 'turkey', 'france', 'africa']):
         categories.append('Politics')
+    if any(word in title.lower() for word in ['oil', 'economy', 'market', 'price', 'inflation']):
+        categories.append('Business')
     
     html = f'''<!DOCTYPE html>
 <html lang="en">
@@ -318,7 +326,7 @@ def check_and_post():
     for article in articles:
         story_id = article['title'][:80]
         if story_id in processed:
-            print(f"   ⏭️ Already posted")
+            print(f"   ⏭️ Already posted: {article['title'][:50]}...")
             continue
         
         print(f"\n📰 {article['title'][:70]}...")
@@ -335,36 +343,37 @@ def check_and_post():
         )
         
         word_count = len(content.split())
-        print(f"   📝 Final: {word_count} words")
+        print(f"   📝 Final word count: {word_count}")
         
-        # Check for placeholders in final output
-        if '[LOCATION]' in content or '[DATE]' in content:
-            print(f"   ⚠️ WARNING: Placeholders still present!")
+        # Final check for placeholders
+        if '[LOCATION]' in content or '[DATE]' in content or '[DAY]' in content:
+            print(f"   ⚠️ WARNING: Placeholders found! Using fallback instead.")
+            content = get_human_fallback(article['title'], article.get('description', ''))
         
         service = google_login()
         if service:
             post_to_blogger(service, article['title'], content, images, article['source'])
             processed.add(story_id)
             save_processed(processed)
-            print(f"   ✅ Published!")
+            print(f"   ✅ Published successfully!")
         
         break
 
 def run():
     print("""
     ╔══════════════════════════════════════════════════════════════════════╗
-    ║         📰 HUMANISED NEWS BOT - COMPLETE FINAL VERSION              ║
+    ║         📰 FINAL HUMANISED NEWS BOT - COMPLETE VERSION              ║
     ║                                                                      ║
-    ║   ✓ Real journalist style - human sounding                          ║
+    ║   ✓ Humanised articles (real journalist style)                      ║
     ║   ✓ NO placeholders like [LOCATION]                                 ║
-    ║   ✓ Specific details and realistic quotes                           ║
     ║   ✓ Clean fallback with no brackets                                 ║
-    ║   ✓ Text justified for newspaper feel                               ║
+    ║   ✓ Text justified (newspaper style)                                ║
+    ║   ✓ Retry logic for short articles                                  ║
     ║   ✓ Runs every 10 minutes                                           ║
     ╚══════════════════════════════════════════════════════════════════════╝
     """)
     
-    print("✅ Bot is RUNNING")
+    print("✅ Bot is RUNNING on GitHub Actions")
     print("⏰ Runs every 10 minutes")
     print("📝 Writing humanised articles (no placeholders)\n")
     
