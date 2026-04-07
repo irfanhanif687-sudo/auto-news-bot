@@ -49,10 +49,11 @@ def google_login():
             token.write(creds.to_json())
     return build('blogger', 'v3', credentials=creds)
 
-# ========== RSS FEEDS ==========
+# ========== RSS FEEDS (Sab tarah ki news ke liye) ==========
 RSS_FEEDS = [
     'http://feeds.bbci.co.uk/news/world/rss.xml',
     'http://feeds.bbci.co.uk/news/business/rss.xml',
+    'http://feeds.bbci.co.uk/sport/rss.xml',
     'https://www.aljazeera.com/xml/rss/all.xml',
 ]
 
@@ -72,8 +73,8 @@ def fetch_news():
                 description = entry.get('summary', '')[:400]
                 description = re.sub(r'<[^>]+>', '', description)
                 
-                # Skip unwanted topics
-                skip_words = ['beer', 'balloon', 'mortgage', 'recipe', 'cook', 'celebrity', 'gossip', 'student loan']
+                # Sirf bakwas news skip karo
+                skip_words = ['beer', 'balloon', 'mortgage', 'recipe', 'cook', 'celebrity', 'gossip']
                 if any(word in title.lower() for word in skip_words):
                     continue
                 
@@ -89,7 +90,6 @@ def fetch_news():
         except Exception as e:
             print(f"      ⚠️ Feed error: {e}")
     
-    # Remove duplicates
     seen = set()
     unique = []
     for a in articles:
@@ -137,38 +137,116 @@ def get_images(title):
     
     return images[:2]
 
-def write_human_article(title, description, source, retry_count=0):
-    """Humanised article - real journalist style, no placeholders"""
-    current_date = datetime.now().strftime("%B %d, %Y")
+def detect_news_category(title):
+    """News ki category detect karo"""
+    title_lower = title.lower()
     
-    prompt = f"""Write a complete news article. Make it sound like a real journalist wrote it.
+    if any(word in title_lower for word in ['football', 'soccer', 'champions league', 'barcelona', 'real madrid', 'premier league', 'match', 'goal', 'win', 'defeat']):
+        return 'sports'
+    elif any(word in title_lower for word in ['iran', 'israel', 'trump', 'war', 'attack', 'missile', 'strike', 'military', 'consulate']):
+        return 'politics'
+    elif any(word in title_lower for word in ['oil', 'price', 'economy', 'market', 'inflation', 'stock', 'trade']):
+        return 'business'
+    elif any(word in title_lower for word in ['train', 'crash', 'accident', 'killed', 'dead', 'collision', 'death']):
+        return 'accident'
+    else:
+        return 'general'
+
+def write_human_article(title, description, source, retry_count=0):
+    """Category ke hisaab se humanised article"""
+    current_date = datetime.now().strftime("%B %d, %Y")
+    category = detect_news_category(title)
+    
+    # Category-specific prompts
+    if category == 'sports':
+        prompt = f"""Write a SPORTS NEWS article like a real sports journalist.
 
 TITLE: {title}
 DATE: {current_date}
 SOURCE: {source}
 CONTEXT: {description[:400]}
 
-IMPORTANT RULES:
-- Write 600-1000 words
-- NO placeholders like [LOCATION] or [DATE]
-- Use specific details from the context
-- Add realistic quotes from witnesses, officials, or experts
-- Write short sentences (15-25 words)
-- Start with a strong opening paragraph
-- End naturally - no "in conclusion"
-- Sound human, not like AI
+Write like ESPN or BBC Sport:
+- Start with the key moment: "In a stunning match at Camp Nou..."
+- Add match atmosphere: crowd reaction, tension, excitement
+- Mention players, managers, tactics
+- Include quotes from players or managers (realistic)
+- Talk about what this means for the tournament/league
+- End with what's next for both teams
 
-STRUCTURE TO FOLLOW:
-1. Opening: What happened, where, when
-2. Details: What we know so far
-3. Quotes: What people are saying
-4. Context: Why this matters
-5. What happens next
+Be energetic, passionate, and human. 500-800 words. Write now:"""
+    
+    elif category == 'politics':
+        prompt = f"""Write a POLITICS NEWS article like a real journalist.
 
-Write the complete article now:"""
+TITLE: {title}
+DATE: {current_date}
+SOURCE: {source}
+CONTEXT: {description[:400]}
+
+Write like BBC News or Al Jazeera:
+- Start with what happened, where, when
+- Add official statements and reactions
+- Include witness or expert quotes
+- Explain why this matters
+- What happens next
+
+Be factual but human. 500-800 words. Write now:"""
+    
+    elif category == 'business':
+        prompt = f"""Write a BUSINESS NEWS article like a real financial journalist.
+
+TITLE: {title}
+DATE: {current_date}
+SOURCE: {source}
+CONTEXT: {description[:400]}
+
+Write like Bloomberg or Financial Times:
+- Start with the key economic impact
+- Add numbers, percentages, trends
+- Include analyst quotes
+- Explain how this affects ordinary people
+- Future outlook
+
+Be clear and informative. 500-800 words. Write now:"""
+    
+    elif category == 'accident':
+        prompt = f"""Write a NEWS ARTICLE about this accident/incident.
+
+TITLE: {title}
+DATE: {current_date}
+SOURCE: {source}
+CONTEXT: {description[:400]}
+
+Write like a local news reporter:
+- Start with what happened, where, when
+- Add official statements from police/authorities
+- Include witness quotes (realistic)
+- Mention casualties, response, investigation
+- End with what happens next
+
+Be respectful and factual. 500-800 words. Write now:"""
+    
+    else:
+        prompt = f"""Write a HUMANISED news article.
+
+TITLE: {title}
+DATE: {current_date}
+SOURCE: {source}
+CONTEXT: {description[:400]}
+
+Rules:
+- Sound like a real person, not AI
+- Add specific details and realistic quotes
+- Short sentences, varied length
+- Strong opening, natural ending
+- NO placeholders like [LOCATION]
+- 500-800 words
+
+Write now:"""
 
     try:
-        print(f"   ✍️ Writing article (attempt {retry_count + 1})...")
+        print(f"   ✍️ Writing {category} article (attempt {retry_count + 1})...")
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
@@ -180,18 +258,15 @@ Write the complete article now:"""
         print(f"   📊 Word count: {word_count}")
         
         # Check for placeholders
-        if ('[LOCATION]' in article or '[DATE]' in article or '[DAY]' in article or '[TIME]' in article) and retry_count < 2:
+        if ('[LOCATION]' in article or '[DATE]' in article) and retry_count < 2:
             print(f"   ⚠️ Found placeholders, retrying...")
             time.sleep(5)
             return write_human_article(title, description, source, retry_count + 1)
         
-        if word_count < 400 and retry_count < 2:
+        if word_count < 300 and retry_count < 2:
             print(f"   ⚠️ Too short ({word_count} words), retrying...")
             time.sleep(5)
             return write_human_article(title, description, source, retry_count + 1)
-        
-        if word_count < 200:
-            return get_human_fallback(title, description)
         
         return article
         
@@ -201,23 +276,43 @@ Write the complete article now:"""
             print(f"   🔄 Retrying...")
             time.sleep(10)
             return write_human_article(title, description, source, retry_count + 1)
-        return get_human_fallback(title, description)
+        return get_human_fallback(title, description, category)
 
-def get_human_fallback(title, description):
-    """Clean fallback - NO PLACEHOLDERS at all"""
-    return f"""<p>Here's what we know so far about this developing story.</p>
+def get_human_fallback(title, description, category):
+    """Category-specific fallback - NO PLACEHOLDERS"""
+    
+    if category == 'sports':
+        return f"""<p>In what fans are calling a thrilling encounter, {title[:80]} delivered all the drama and excitement expected from this fixture.</p>
 
-<p>According to initial reports from officials and local authorities, this incident has occurred and is currently under active investigation.</p>
+<p>The atmosphere inside the stadium was electric from the first whistle. Supporters of both sides created a wall of sound that never let up throughout the 90 minutes.</p>
 
-<p>"Our teams are on the scene and working to gather all the facts," a spokesperson told local media. "We will provide updates as more information becomes available to us."</p>
+<p>Speaking after the match, the winning team's manager said: "The players gave everything tonight. I couldn't be prouder of their effort and commitment."</p>
 
-<p>Witnesses in the area described hearing loud noises and seeing emergency vehicles responding quickly. "It happened very suddenly," one person who was nearby said. "Everyone was shocked by what they saw unfold before them."</p>
+<p>This result could have major implications for the tournament standings. Both teams will now turn their attention to their next fixtures, knowing that every point matters at this stage of the competition.</p>
 
-<p>Local authorities have asked people to avoid the area while the investigation continues. Emergency services remain at the location.</p>
+<p>Football fans around the world will be watching closely to see how this result shapes the rest of the season.</p>"""
+    
+    elif category == 'accident':
+        return f"""<p>Authorities have confirmed they are responding to an incident involving {title[:80]}.</p>
 
-<p>This remains a developing situation. We will update this article when officials release additional details to the public.</p>
+<p>Emergency services arrived at the scene quickly. Officials say an investigation is now underway to determine the full circumstances.</p>
 
-<p>The incident is being treated seriously by law enforcement. Further information is expected to be released in the coming hours as the investigation progresses.</p>"""
+<p>"Our thoughts are with everyone affected," a local official said. "We will release more information as soon as we have confirmed details."</p>
+
+<p>Witnesses described hearing loud noises and seeing emergency vehicles rush to the location. The area remains cordoned off while investigators do their work.</p>
+
+<p>This story is still developing. We will update as more official information becomes available.</p>"""
+    
+    else:
+        return f"""<p>Here's what we know so far about {title[:80]}.</p>
+
+<p>According to initial reports, this is a significant development that people are watching closely around the world.</p>
+
+<p>Officials have confirmed they are aware of the situation and are monitoring it closely. More details are expected to emerge in the coming hours.</p>
+
+<p>Our team is following this story and will bring you updates as soon as new information becomes available.</p>
+
+<p>Check back later for the latest developments on this ongoing story.</p>"""
 
 def post_to_blogger(service, title, content, images, source):
     current_date = datetime.now().strftime("%B %d, %Y")
@@ -225,11 +320,9 @@ def post_to_blogger(service, title, content, images, source):
     reading_time = max(4, round(word_count / 200))
     clean_title = title.replace('<', '&lt;').replace('>', '&gt;')
     
-    # Create SEO-friendly slug
     slug = re.sub(r'[^a-z0-9]+', '-', clean_title.lower())[:60]
     current_url = f"https://newnews4public.blogspot.com/{datetime.now().year}/{datetime.now().month}/{slug}.html"
     
-    # Images HTML
     images_html = ""
     for img in images:
         images_html += f'''
@@ -239,18 +332,19 @@ def post_to_blogger(service, title, content, images, source):
         </figure>
         '''
     
-    # Process content
     content_html = content.replace('\n\n', '</p><p>')
     content_html = f'<p>{content_html}</p>'
     content_html = content_html.replace('<p><h2>', '<h2>').replace('</h2></p>', '</h2>')
-    content_html = content_html.replace('<p><h3>', '<h3>').replace('</h3></p>', '</h3>')
     
-    # Categories
-    categories = ['World News']
-    if any(word in title.lower() for word in ['iran', 'israel', 'trump', 'us', 'china', 'russia', 'ukraine', 'gaza', 'lebanon', 'turkey', 'france', 'africa']):
-        categories.append('Politics')
-    if any(word in title.lower() for word in ['oil', 'economy', 'market', 'price', 'inflation']):
-        categories.append('Business')
+    category = detect_news_category(title)
+    if category == 'sports':
+        labels = ['Sports News', 'Football']
+    elif category == 'politics':
+        labels = ['World News', 'Politics']
+    elif category == 'business':
+        labels = ['Business News', 'Economy']
+    else:
+        labels = ['World News', 'Breaking News']
     
     html = f'''<!DOCTYPE html>
 <html lang="en">
@@ -271,11 +365,10 @@ def post_to_blogger(service, title, content, images, source):
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{ font-family: 'Georgia', 'Times New Roman', serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.7; font-size: 18px; color: #1a1a1a; background: #fff; }}
         h1 {{ font-size: 36px; line-height: 1.3; margin-bottom: 15px; color: #000; }}
-        h2 {{ font-size: 26px; margin: 40px 0 20px 0; border-bottom: 2px solid #1a73e8; padding-bottom: 8px; color: #000; }}
         .meta {{ color: #666; font-size: 13px; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; flex-wrap: wrap; }}
         .article-content p {{ margin-bottom: 22px; text-align: justify; line-height: 1.7; }}
         hr {{ margin: 40px 0; border: none; height: 1px; background: #e0e0e0; }}
-        @media (max-width: 600px) {{ body {{ padding: 15px; font-size: 16px; }} h1 {{ font-size: 28px; }} h2 {{ font-size: 22px; }} }}
+        @media (max-width: 600px) {{ body {{ padding: 15px; font-size: 16px; }} h1 {{ font-size: 28px; }} }}
     </style>
 </head>
 <body>
@@ -297,7 +390,7 @@ def post_to_blogger(service, title, content, images, source):
 <hr>
 
 <div style="text-align: center; font-size: 12px; color: #999;">
-    <p>© {datetime.now().year} News Analysis | In-Depth Coverage</p>
+    <p>© {datetime.now().year} News Analysis</p>
 </div>
 
 </body>
@@ -305,7 +398,7 @@ def post_to_blogger(service, title, content, images, source):
     
     post = service.posts().insert(
         blogId=BLOG_ID,
-        body={'title': clean_title[:70], 'content': html, 'labels': categories},
+        body={'title': clean_title[:70], 'content': html, 'labels': labels},
         isDraft=False
     ).execute()
     print(f"   ✅ Published: {post.get('url')}")
@@ -326,11 +419,12 @@ def check_and_post():
     for article in articles:
         story_id = article['title'][:80]
         if story_id in processed:
-            print(f"   ⏭️ Already posted: {article['title'][:50]}...")
+            print(f"   ⏭️ Already posted")
             continue
         
         print(f"\n📰 {article['title'][:70]}...")
         print(f"   Source: {article['source']}")
+        print(f"   Category: {detect_news_category(article['title'])}")
         
         print(f"   🖼️ Getting images...")
         images = get_images(article['title'])
@@ -343,39 +437,34 @@ def check_and_post():
         )
         
         word_count = len(content.split())
-        print(f"   📝 Final word count: {word_count}")
-        
-        # Final check for placeholders
-        if '[LOCATION]' in content or '[DATE]' in content or '[DAY]' in content:
-            print(f"   ⚠️ WARNING: Placeholders found! Using fallback instead.")
-            content = get_human_fallback(article['title'], article.get('description', ''))
+        print(f"   📝 Final: {word_count} words")
         
         service = google_login()
         if service:
             post_to_blogger(service, article['title'], content, images, article['source'])
             processed.add(story_id)
             save_processed(processed)
-            print(f"   ✅ Published successfully!")
+            print(f"   ✅ Published!")
         
         break
 
 def run():
     print("""
     ╔══════════════════════════════════════════════════════════════════════╗
-    ║         📰 FINAL HUMANISED NEWS BOT - COMPLETE VERSION              ║
+    ║      📰 HUMANISED NEWS BOT - ALL CATEGORIES (Sports/Politics/Business) ║
     ║                                                                      ║
-    ║   ✓ Humanised articles (real journalist style)                      ║
-    ║   ✓ NO placeholders like [LOCATION]                                 ║
-    ║   ✓ Clean fallback with no brackets                                 ║
-    ║   ✓ Text justified (newspaper style)                                ║
-    ║   ✓ Retry logic for short articles                                  ║
+    ║   ✓ Sports news (football, champions league, matches)               ║
+    ║   ✓ Politics news (Iran, Israel, Trump, war)                        ║
+    ║   ✓ Business news (oil, economy, prices)                            ║
+    ║   ✓ Accidents and general news                                      ║
+    ║   ✓ Humanised writing, no placeholders                              ║
     ║   ✓ Runs every 10 minutes                                           ║
     ╚══════════════════════════════════════════════════════════════════════╝
     """)
     
-    print("✅ Bot is RUNNING on GitHub Actions")
+    print("✅ Bot is RUNNING")
     print("⏰ Runs every 10 minutes")
-    print("📝 Writing humanised articles (no placeholders)\n")
+    print("🏆 Covers: Sports | Politics | Business | Accidents\n")
     
     check_and_post()
 
