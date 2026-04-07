@@ -49,16 +49,13 @@ def google_login():
             token.write(creds.to_json())
     return build('blogger', 'v3', credentials=creds)
 
-# ========== RSS FEEDS ==========
+# ========== CLEAN RSS FEEDS (Only serious news) ==========
 RSS_FEEDS = [
     'http://feeds.bbci.co.uk/news/world/rss.xml',
-    'http://feeds.bbci.co.uk/news/technology/rss.xml',
     'http://feeds.bbci.co.uk/news/business/rss.xml',
     'https://www.aljazeera.com/xml/rss/all.xml',
     'https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml',
     'https://feeds.npr.org/1001/rss.xml',
-    'https://rss.cnn.com/rss/edition.rss',
-    'https://www.theguardian.com/world/rss',
 ]
 
 def fetch_all_news():
@@ -73,11 +70,17 @@ def fetch_all_news():
             source_name = feed.feed.get('title', 'Unknown')[:30]
             print(f"      📻 {source_name} - {len(feed.entries)} stories")
             
-            for entry in feed.entries[:5]:
+            for entry in feed.entries[:4]:
                 title = entry.get('title', '').strip()
                 link = entry.get('link', '')
                 description = entry.get('summary', '')[:300]
                 description = re.sub(r'<[^>]+>', '', description)
+                
+                # Skip weird/random stories
+                skip_words = ['beer', 'balloon', 'mortgage', 'recipe', 'cook', 'celebrity', 'gossip']
+                if any(word in title.lower() for word in skip_words):
+                    print(f"      ⏭️ Skipping: {title[:40]}...")
+                    continue
                 
                 if title and link and len(title) > 20:
                     story_id = title[:80]
@@ -105,17 +108,15 @@ def fetch_all_news():
 
 def generate_seo_keywords(title, description, source):
     """Generate SEO-optimized keywords"""
-    prompt = f"""Generate 15 SEO keywords for this news article:
+    prompt = f"""Generate 12 SEO keywords for this news article:
 
 Title: {title}
 Description: {description[:200]}
-Source: {source}
 
 Rules:
-- Mix of short-tail and long-tail keywords
-- Include location names if mentioned
-- Format as comma-separated list only
-- Keep under 250 characters
+- Mix of short and long keywords
+- Comma separated only
+- Keep under 200 characters
 
 Generate now:"""
     
@@ -129,18 +130,12 @@ Generate now:"""
         return keywords[:300]
     except:
         words = re.findall(r'\b[A-Za-z]{4,}\b', title)
-        return ', '.join(words[:8]) + ', news, breaking news, world news'
+        return ', '.join(words[:6]) + ', news, world news'
 
 def generate_seo_description(title, description):
     """Generate SEO meta description"""
-    prompt = f"""Write a compelling SEO meta description (150-160 characters) for:
+    prompt = f"""Write a compelling meta description (150-160 characters) for:
 Title: {title}
-Context: {description[:150]}
-
-Rules:
-- Include main keyword
-- End with call to action
-- Exactly 150-160 characters
 
 Write now:"""
     
@@ -153,159 +148,124 @@ Write now:"""
         meta_desc = response.choices[0].message.content.strip()
         return meta_desc[:160]
     except:
-        return f"{title[:140]}... Read full analysis on our blog."
+        return f"{title[:140]}... Read full analysis."
 
 def get_images(title):
     """Get images with SEO alt text"""
     images = []
-    keywords = ' '.join(title.split()[:5])
+    keywords = ' '.join(title.split()[:4])
     
-    search_terms = [keywords, f"{keywords} news", f"{keywords} latest"]
-    
-    for i, term in enumerate(search_terms[:3]):
-        try:
-            url = f"https://api.pexels.com/v1/search?query={quote(term)}&per_page=3&orientation=landscape"
-            headers = {"Authorization": PEXELS_API_KEY}
-            response = requests.get(url, headers=headers, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                photos = data.get('photos', [])
-                if photos:
-                    photo = photos[0]
-                    images.append({
-                        'url': photo['src']['large'],
-                        'alt': f"{title[:55]} - news photo",
-                        'caption': title[:70],
-                        'credit': photo.get('photographer', 'Pexels')
-                    })
-                    continue
-        except:
-            pass
+    try:
+        url = f"https://api.pexels.com/v1/search?query={quote(keywords)}&per_page=2&orientation=landscape"
+        headers = {"Authorization": PEXELS_API_KEY}
+        response = requests.get(url, headers=headers, timeout=10)
         
+        if response.status_code == 200:
+            data = response.json()
+            photos = data.get('photos', [])
+            for i, photo in enumerate(photos[:2]):
+                images.append({
+                    'url': photo['src']['large'],
+                    'alt': f"{title[:50]} - news photo",
+                    'caption': title[:60],
+                    'credit': photo.get('photographer', 'Pexels')
+                })
+    except:
+        pass
+    
+    # Fallback images
+    if not images:
         fallback = [
-            ('https://images.pexels.com/photos/6071605/pexels-photo-6071605.jpeg', 'Global news view', 'World affairs'),
-            ('https://images.pexels.com/photos/1181467/pexels-photo-1181467.jpeg', 'Technology news', 'Latest tech'),
-            ('https://images.pexels.com/photos/210607/pexels-photo-210607.jpeg', 'Breaking news', 'Current events')
+            'https://images.pexels.com/photos/6071605/pexels-photo-6071605.jpeg',
+            'https://images.pexels.com/photos/1181467/pexels-photo-1181467.jpeg'
         ]
-        images.append({
-            'url': fallback[i][0],
-            'alt': fallback[i][1],
-            'caption': fallback[i][2],
-            'credit': 'Pexels'
-        })
+        for i, img_url in enumerate(fallback):
+            images.append({
+                'url': img_url,
+                'alt': f"News image {i+1}",
+                'caption': title[:50],
+                'credit': 'Pexels'
+            })
     
     return images[:2]
 
-def write_seo_article(title, description, source, retry_count=0):
-    """Write SEO-optimized article with retry logic - FIX FOR INCOMPLETE POSTS"""
+def write_human_article(title, description, source, retry_count=0):
+    """Write HUMAN-SOUNDING article - not robotic"""
     current_date = datetime.now().strftime("%B %d, %Y")
     keywords = generate_seo_keywords(title, description, source)
     meta_desc = generate_seo_description(title, description)
     
-    prompt = f"""Write a complete, detailed news article.
+    # HUMANIZED PROMPT - like a real journalist
+    prompt = f"""Write a news article like a real journalist would write. Make it sound natural, not robotic.
 
-DATE: {current_date}
 TITLE: {title}
+DATE: {current_date}
 SOURCE: {source}
-CONTEXT: {description[:300]}
+BACKGROUND: {description[:250]}
 
-Write with these sections:
+Write in this style:
+- Use short, punchy sentences
+- Sound like a person talking, not a robot
+- Add some emotion and reaction
+- Use phrases like "according to officials", "witnesses say", "experts believe"
+- Keep paragraphs short (2-3 sentences max)
 
-## Introduction
-(2-3 paragraphs)
-
-## Key Takeaways
-- Point 1
-- Point 2
-- Point 3
-- Point 4
-- Point 5
-
-## Background
-(2-3 paragraphs)
-
-## Detailed Analysis
-(3-4 paragraphs)
-
-## Impact
-(2 paragraphs)
-
-## Frequently Asked Questions
-
-**Q1: Question?**
-Answer here.
-
-**Q2: Question?**
-Answer here.
-
-**Q3: Question?**
-Answer here.
-
-## Conclusion
-(2 paragraphs)
+Structure:
+1. Start with a strong opening that grabs attention
+2. Tell readers what happened and why it matters
+3. Add quotes or reactions (make them realistic)
+4. Explain what happens next
+5. End with a thoughtful conclusion
 
 REQUIREMENTS:
-- Minimum 1000 words
-- Each paragraph 2-3 sentences
-- Use <strong> for important phrases
-- Write complete sentences
+- Minimum 600 words
+- Write naturally, like a news anchor would speak
+- No bullet points in the main narrative
 - DO NOT cut off mid-sentence
-- Finish the article properly
 
 Write the complete article now:"""
 
     try:
-        print(f"   ✍️ Calling AI (attempt {retry_count + 1})...")
+        print(f"   ✍️ Writing human-style article (attempt {retry_count + 1})...")
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
-            timeout=120
+            timeout=90
         )
         article = response.choices[0].message.content
-        article = re.sub(r'^#.*$', '', article, flags=re.MULTILINE)
         
-        # Check if article is complete (minimum 500 words)
         word_count = len(article.split())
         print(f"   📊 Word count: {word_count}")
         
-        if word_count < 400 and retry_count < 2:
-            print(f"   ⚠️ Article too short ({word_count} words), retrying...")
+        if word_count < 300 and retry_count < 3:
+            print(f"   ⚠️ Too short, retrying...")
             time.sleep(5)
-            return write_seo_article(title, description, source, retry_count + 1)
+            return write_human_article(title, description, source, retry_count + 1)
         
-        if word_count < 300:
-            print(f"   ⚠️ Article still short, using fallback")
-            return get_fallback_article(title, description), keywords, meta_desc
+        if word_count < 150:
+            return get_human_fallback(title, description), keywords, meta_desc
         
         return article, keywords, meta_desc
         
     except Exception as e:
-        print(f"   ❌ AI Error: {e}")
-        if retry_count < 2:
+        print(f"   ❌ Error: {e}")
+        if retry_count < 3:
             print(f"   🔄 Retrying...")
             time.sleep(10)
-            return write_seo_article(title, description, source, retry_count + 1)
-        return get_fallback_article(title, description), keywords, meta_desc
+            return write_human_article(title, description, source, retry_count + 1)
+        return get_human_fallback(title, description), keywords, meta_desc
 
-def get_fallback_article(title, description):
-    """Fallback article when AI fails"""
-    return f"""<h2>Introduction</h2>
-<p><strong>{title}</strong></p>
-<p>{description if description else 'This breaking news story is developing rapidly.'}</p>
+def get_human_fallback(title, description):
+    """Human-sounding fallback article"""
+    return f"""<p>Here's what we know so far about <strong>{title}</strong>.</p>
 
-<h2>Key Takeaways</h2>
-<ul>
-<li><strong>Breaking:</strong> Major development in this ongoing story</li>
-<li><strong>Impact:</strong> Global implications being analyzed</li>
-<li><strong>Latest:</strong> Updates expected soon</li>
-</ul>
+<p>This story is developing quickly. Initial reports indicate this is a significant development that people around the world are watching closely.</p>
 
-<h2>Analysis</h2>
-<p>Our team is monitoring this situation closely. This is a developing story that will be updated as new information becomes available.</p>
+<p>According to officials, more details are expected to emerge in the coming hours. Our team is actively monitoring the situation and will bring you updates as soon as they become available.</p>
 
-<h2>Conclusion</h2>
-<p>Stay tuned to News Analysis for the latest updates on this and other breaking news stories from around the world.</p>"""
+<p>What makes this story particularly interesting is how it could affect everyday people. Experts are already weighing in on the potential implications.</p>
+
+<p>We'll continue following this story and update this article with fresh information. Bookmark this page and check back later for the latest developments.</p>"""
 
 def create_seo_schema(title, description, keywords, current_url, images, date_published):
     """Complete SEO Schema markup"""
@@ -324,10 +284,10 @@ def create_seo_schema(title, description, keywords, current_url, images, date_pu
     }
 
 def post_to_blogger(service, title, content, images, source, keywords, meta_desc):
-    """Post with full SEO optimization and justified text"""
+    """Post with full SEO optimization"""
     current_date = datetime.now().strftime("%B %d, %Y")
     word_count = len(content.split())
-    reading_time = max(5, round(word_count / 200))
+    reading_time = max(4, round(word_count / 200))
     clean_title = title.replace('<', '&lt;').replace('>', '&gt;')
     
     # Create SEO-friendly slug
@@ -340,27 +300,25 @@ def post_to_blogger(service, title, content, images, source, keywords, meta_desc
     for i, img in enumerate(images):
         images_html += f'''
         <figure style="text-align: center; margin: 25px 0;">
-            <img src="{img['url']}" alt="{img['alt'][:80]}" style="width:100%; max-width:750px; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.1);" loading="lazy">
+            <img src="{img['url']}" alt="{img['alt'][:80]}" style="width:100%; max-width:750px; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.1);" loading="lazy">
             <figcaption style="font-size:12px; color:#666; margin-top:8px;">📷 {img['caption'][:70]} | Photo: {img['credit']}</figcaption>
         </figure>
         '''
     
-    # Process content - fix for incomplete HTML
+    # Process content - convert to HTML paragraphs
     content_html = content.replace('\n\n', '</p><p>')
     content_html = f'<p>{content_html}</p>'
     content_html = content_html.replace('<p><h2>', '<h2>').replace('</h2></p>', '</h2>')
-    content_html = content_html.replace('<p><ul>', '<ul>').replace('</ul></p>', '</ul>')
-    content_html = content_html.replace('<p><li>', '<li>').replace('</li></p>', '</li>')
-    content_html = re.sub(r'\*\*Q(\d+): (.*?)\*\*\s*\n', r'<div class="faq-q"><strong>❓ Q\1: \2</strong></div><div class="faq-a">', content_html)
+    content_html = content_html.replace('<p><h3>', '<h3>').replace('</h3></p>', '</h3>')
     content_html = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', content_html)
     
     # Categories
     categories = ['World News']
-    if any(word in title.lower() for word in ['iran', 'israel', 'trump', 'us', 'china', 'russia', 'ukraine']):
+    if any(word in title.lower() for word in ['iran', 'israel', 'trump', 'us', 'china', 'russia', 'ukraine', 'gaza', 'lebanon']):
         categories.append('Politics')
-    if any(word in title.lower() for word in ['economy', 'market', 'oil', 'trade']):
+    if any(word in title.lower() for word in ['economy', 'market', 'oil', 'trade', 'inflation', 'price']):
         categories.append('Business')
-    if any(word in title.lower() for word in ['tech', 'ai', 'space', 'nasa']):
+    if any(word in title.lower() for word in ['tech', 'ai', 'space', 'nasa', 'moon', 'mars']):
         categories.append('Technology')
     
     schema = create_seo_schema(title, meta_desc, keywords, current_url, images, date_published)
@@ -370,7 +328,7 @@ def post_to_blogger(service, title, content, images, source, keywords, meta_desc
     
     social_html = f'''
     <div style="text-align: center; margin: 35px 0; padding: 20px; background: #f8f9fa; border-radius: 16px;">
-        <h3 style="margin:0 0 15px 0;">📢 Share This News</h3>
+        <h3 style="margin:0 0 15px 0;">📢 Share This Article</h3>
         <div style="display: flex; justify-content: center; gap: 12px; flex-wrap: wrap;">
             <a href="https://twitter.com/intent/tweet?text={quote(clean_title[:70])}&url={quote(current_url)}" target="_blank" style="background:#1DA1F2; color:white; padding:10px 20px; border-radius:30px; text-decoration:none;">🐦 Twitter</a>
             <a href="https://www.facebook.com/sharer/sharer.php?u={quote(current_url)}" target="_blank" style="background:#4267B2; color:white; padding:10px 20px; border-radius:30px; text-decoration:none;">📘 Facebook</a>
@@ -380,10 +338,10 @@ def post_to_blogger(service, title, content, images, source, keywords, meta_desc
     '''
     
     related_html = f'''
-    <div style="background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%); padding: 20px; border-radius: 16px; margin: 30px 0;">
-        <h3 style="margin:0 0 15px 0;">📌 Related News</h3>
+    <div style="background: #f5f7fa; padding: 20px; border-radius: 16px; margin: 30px 0;">
+        <h3 style="margin:0 0 15px 0;">📌 Topics</h3>
         <div style="display: flex; gap: 10px; flex-wrap: wrap;">{categories_html}</div>
-        <p style="margin:15px 0 0 0; font-size:14px;">🔍 <strong>Keywords:</strong> {keywords[:200]}</p>
+        <p style="margin:15px 0 0 0; font-size:13px; color:#666;">🔍 Keywords: {keywords[:200]}</p>
     </div>
     '''
     
@@ -413,18 +371,14 @@ def post_to_blogger(service, title, content, images, source, keywords, meta_desc
     
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ font-family: 'Georgia', 'Times New Roman', serif; max-width: 850px; margin: 0 auto; padding: 20px; line-height: 1.8; font-size: 19px; color: #1a1a1a; background: #fff; }}
-        h1 {{ font-size: 38px; line-height: 1.3; margin-bottom: 15px; color: #000; }}
-        h2 {{ font-size: 28px; margin: 40px 0 20px 0; border-bottom: 3px solid #1a73e8; padding-bottom: 10px; color: #000; }}
-        h3 {{ font-size: 22px; margin: 30px 0 15px 0; color: #1a1a1a; }}
-        .meta {{ color: #666; font-size: 14px; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; flex-wrap: wrap; }}
-        .article-content p {{ margin-bottom: 25px; text-align: justify; }}
-        .article-content ul, .article-content ol {{ margin: 20px 0 25px 40px; }}
-        .article-content li {{ margin: 8px 0; }}
-        .faq-q {{ font-weight: bold; margin: 30px 0 10px 0; font-size: 18px; color: #1a73e8; }}
-        .faq-a {{ margin-bottom: 20px; padding-left: 20px; border-left: 4px solid #1a73e8; }}
-        hr {{ margin: 40px 0; border: none; height: 1px; background: linear-gradient(to right, transparent, #ccc, transparent); }}
-        @media (max-width: 600px) {{ body {{ padding: 15px; font-size: 17px; }} h1 {{ font-size: 28px; }} h2 {{ font-size: 22px; }} }}
+        body {{ font-family: 'Georgia', 'Times New Roman', serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.7; font-size: 18px; color: #1a1a1a; background: #fff; }}
+        h1 {{ font-size: 36px; line-height: 1.3; margin-bottom: 15px; color: #000; }}
+        h2 {{ font-size: 26px; margin: 40px 0 20px 0; border-bottom: 2px solid #1a73e8; padding-bottom: 8px; color: #000; }}
+        .meta {{ color: #666; font-size: 13px; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; flex-wrap: wrap; }}
+        .article-content p {{ margin-bottom: 22px; text-align: justify; line-height: 1.7; }}
+        .article-content h2 {{ margin-top: 35px; }}
+        hr {{ margin: 40px 0; border: none; height: 1px; background: #e0e0e0; }}
+        @media (max-width: 600px) {{ body {{ padding: 15px; font-size: 16px; }} h1 {{ font-size: 28px; }} h2 {{ font-size: 22px; }} }}
     </style>
 </head>
 <body>
@@ -435,7 +389,6 @@ def post_to_blogger(service, title, content, images, source, keywords, meta_desc
     <span>📅 {current_date}</span>
     <span>📖 {reading_time} min read</span>
     <span>📰 {source}</span>
-    <span>✍️ Analysis Team</span>
 </div>
 
 {images_html}
@@ -450,8 +403,7 @@ def post_to_blogger(service, title, content, images, source, keywords, meta_desc
 <hr>
 
 <div style="text-align: center; font-size: 12px; color: #999;">
-    <p>© {datetime.now().year} News Analysis | All Rights Reserved</p>
-    <p>🔍 {keywords[:150]}</p>
+    <p>© {datetime.now().year} News Analysis</p>
 </div>
 
 </body>
@@ -478,7 +430,7 @@ def check_and_post():
     processed = load_processed()
     published_count = 0
     
-    for article in articles:
+    for article in articles[:3]:  # Max 3 posts per run
         story_id = article['title'][:80]
         if story_id in processed:
             print(f"   ⏭️ Already posted: {article['title'][:50]}...")
@@ -493,14 +445,14 @@ def check_and_post():
         print(f"   ✅ {len(images)} images ready")
         
         print(f"   ✍️ Writing article...")
-        content, keywords, meta_desc = write_seo_article(
+        content, keywords, meta_desc = write_human_article(
             article['title'], 
             article.get('description', ''), 
             article['source']
         )
         
         word_count = len(content.split())
-        print(f"   📝 Final word count: {word_count}")
+        print(f"   📝 Final: {word_count} words")
         
         service = google_login()
         if service:
@@ -508,36 +460,31 @@ def check_and_post():
             processed.add(story_id)
             save_processed(processed)
             published_count += 1
-            print(f"   ✅ Published! (Post #{published_count} this run)")
         
-        # Longer delay between posts
-        print(f"   ⏸️ Waiting 25 seconds before next...")
-        time.sleep(25)
+        if published_count < len(articles[:3]):
+            print(f"   ⏸️ Waiting 20 seconds...")
+            time.sleep(20)
     
     print(f"\n{'='*50}")
-    print(f"📊 SUMMARY: {published_count} new articles published")
-    print(f"📊 Total published: {len(processed)}")
+    print(f"📊 Published: {published_count} new articles")
     print(f"{'='*50}")
 
 def run():
     print("""
     ╔══════════════════════════════════════════════════════════════════════╗
-    ║         📰 PROFESSIONAL NEWS BOT - COMPLETE FIXED VERSION           ║
+    ║         📰 NEWS BOT - HUMANIZED VERSION                             ║
     ║                                                                      ║
-    ║   ✓ ALL news from 8+ RSS feeds                                      ║
-    ║   ✓ Complete articles (1000+ words)                                 ║
-    ║   ✓ Retry logic for incomplete posts                                ║
-    ║   ✓ Text justified (newspaper style)                                ║
-    ║   ✓ SEO optimized with keywords & meta                              ║
-    ║   ✓ No duplicate posts                                              ║
+    ║   ✓ Natural, human-sounding articles                                ║
+    ║   ✓ Serious news only (no random stories)                           ║
+    ║   ✓ 600+ words per article                                          ║
+    ║   ✓ Text justified for newspaper feel                               ║
     ║   ✓ Runs every 30 minutes                                           ║
     ╚══════════════════════════════════════════════════════════════════════╝
     """)
     
-    print("✅ Bot is RUNNING on GitHub Actions")
-    print("⏰ Checking ALL RSS feeds (8+ sources)")
-    print("📝 Will post ALL new articles found")
-    print("🔄 Retry logic enabled for incomplete posts\n")
+    print("✅ Bot is RUNNING")
+    print("⏰ Checking news every 30 minutes")
+    print("📝 Writing human-style articles\n")
     
     check_and_post()
 
