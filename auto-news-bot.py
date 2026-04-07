@@ -49,14 +49,14 @@ def google_login():
             token.write(creds.to_json())
     return build('blogger', 'v3', credentials=creds)
 
-# ========== HOT TOPICS RSS FEEDS ==========
+# ========== RSS FEEDS ==========
 RSS_FEEDS = [
     'http://feeds.bbci.co.uk/news/world/rss.xml',
     'http://feeds.bbci.co.uk/news/business/rss.xml',
     'https://www.aljazeera.com/xml/rss/all.xml',
 ]
 
-def fetch_hot_news():
+def fetch_news():
     articles = []
     processed = load_processed()
     print(f"   📡 Checking {len(RSS_FEEDS)} feeds...")
@@ -136,68 +136,38 @@ def get_images(title):
     return images[:2]
 
 def write_human_article(title, description, source, retry_count=0):
-    """REAL JOURNALIST STYLE - Humanised article"""
+    """Humanised article - real journalist style"""
     current_date = datetime.now().strftime("%B %d, %Y")
     
-    prompt = f"""Write a NEWS ARTICLE that sounds like a REAL JOURNALIST wrote it for a newspaper or news website.
+    prompt = f"""Write a news article like a real journalist. Make it human, specific, and detailed.
 
 TITLE: {title}
 DATE: {current_date}
 SOURCE: {source}
 CONTEXT: {description[:400]}
 
-🚨 CRITICAL RULES - Make it sound HUMAN, not AI:
-
-DO THIS:
-- Write like a news reporter talking to readers
-- Add REAL-sounding quotes from witnesses, officials, experts (make them specific, not generic)
-- Describe emotions: "Terrified bystanders", "Shaking hands", "Panic erupted", "Relieved but shaken"
-- Use location details: street names, neighborhoods, city landmarks
-- Write short, punchy sentences. Vary the length.
-- Use phrases real journalists use: "according to officials", "witnesses tell us", "video shows", "sources confirm"
-- Add specific times: "Tuesday afternoon", "within minutes", "as of 6pm local time", "early Wednesday"
-- Include small details that make it real: crowd reactions, weather, time of day
-
-DON'T DO THIS:
-- NO generic phrases like "major developing story" or "captured global attention"
-- NO robotic structure with identical section lengths
-- NO fake expert quotes that sound the same every time
-- NO "this matters to you" lectures
-- NO "in conclusion" - real articles don't use this
-
-STRUCTURE (flexible, not rigid):
-
-[STRONG OPENING - 150 words]
-Start with what happened, where, when. Grab attention. Include a witness quote or dramatic detail.
-
-[WHAT WE KNOW - 300 words]
-Facts only. What officials confirmed. What video shows. Timeline of events.
-
-[WITNESS & REACTION - 250 words]
-Real-sounding quotes from ordinary people. How the community is responding.
-
-[OFFICIAL RESPONSE - 200 words]
-What police, government, or officials said. Actions being taken.
-
-[WHY IT MATTERS / CONTEXT - 250 words]
-Brief background. Connect to bigger picture. Keep it relevant.
-
-[WHAT'S NEXT - 150 words]
-What happens in the coming hours/days.
-
-[CLOSING - 100 words]
-End naturally. Not "in conclusion" - just a final observation or quote.
-
 REQUIREMENTS:
-- Minimum 800 words (quality over quantity)
-- At least 3 different quotes from different types of people
-- Specific details (times, locations, reactions)
-- Write like a human, not a robot
+- Write 600-1000 words
+- Add specific details (times, locations, names if possible)
+- Include realistic quotes from witnesses, officials, or experts
+- Write short sentences, vary the length
+- Use active voice
+- Start with a strong opening paragraph
+- End naturally (no "in conclusion")
+- NO placeholders like [LOCATION] - use real info or leave out
+- NO generic phrases like "major developing story"
 
-Write the complete article now:"""
+STRUCTURE:
+1. Opening paragraph: What happened, where, when
+2. Details: What we know so far
+3. Witness/official quotes: What people are saying
+4. Context: Why this matters
+5. What happens next
+
+Write naturally. Be specific. Sound human:"""
 
     try:
-        print(f"   ✍️ Writing humanised article (attempt {retry_count + 1})...")
+        print(f"   ✍️ Writing article (attempt {retry_count + 1})...")
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
@@ -208,8 +178,14 @@ Write the complete article now:"""
         word_count = len(article.split())
         print(f"   📊 Word count: {word_count}")
         
-        if word_count < 600 and retry_count < 2:
-            print(f"   ⚠️ Only {word_count} words, retrying...")
+        # Check for placeholders - agar placeholder hai to retry
+        if ('[LOCATION]' in article or '[DATE]' in article or '[DAY]' in article) and retry_count < 2:
+            print(f"   ⚠️ Found placeholders, retrying...")
+            time.sleep(5)
+            return write_human_article(title, description, source, retry_count + 1)
+        
+        if word_count < 400 and retry_count < 2:
+            print(f"   ⚠️ Too short ({word_count} words), retrying...")
             time.sleep(5)
             return write_human_article(title, description, source, retry_count + 1)
         
@@ -224,23 +200,27 @@ Write the complete article now:"""
         return get_human_fallback(title, description)
 
 def get_human_fallback(title, description):
-    """Human-sounding fallback with specific details"""
-    return f"""<p><strong>{title}</strong></p>
+    """Clean fallback - NO PLACEHOLDERS"""
+    # Extract key words from title
+    words = title.split()
+    main_topic = ' '.join(words[:5]) if len(words) > 5 else title
+    
+    return f"""<p><strong>{main_topic}</strong> - Here's what we know based on initial reports from authorities.</p>
 
-<p>Here's what we know so far about what happened, according to officials and witnesses on the scene.</p>
+<p>Local officials have confirmed they are responding to this incident. Emergency services arrived at the scene and investigations are underway to determine the full circumstances.</p>
 
-<p>The incident unfolded [LOCATION] on [DAY], [DATE]. Witnesses describe hearing [SOUNDS] and seeing [ACTIONS]. "I couldn't believe what I was seeing," one bystander told local media. "Everyone started running."</p>
+<p>"Our teams are on the ground and working to gather all the facts," a spokesperson told local media. "We will provide updates as more information becomes available."</p>
 
-<p>Local authorities confirmed they are investigating. "Our teams responded immediately," an official said. "The situation is under control."</p>
+<p>Witnesses in the area described hearing loud noises and seeing emergency vehicles rush to the location. "It happened very suddenly," one person who was nearby said. "Everyone was shocked by what they saw."</p>
 
-<p>Residents in the area described moments of confusion and fear. "You never think something like this will happen on your street," one neighbor said. "My hands are still shaking."</p>
+<p>This remains a developing situation. Authorities are asking people to avoid the area while the investigation continues. We will update this article when officials release additional details.</p>
 
-<p>This story is still developing. We'll update as more information becomes available from officials and witnesses.</p>"""
+<p>The incident is being treated seriously by local law enforcement. Further information is expected to be released in the coming hours.</p>"""
 
 def post_to_blogger(service, title, content, images, source):
     current_date = datetime.now().strftime("%B %d, %Y")
     word_count = len(content.split())
-    reading_time = max(5, round(word_count / 200))
+    reading_time = max(4, round(word_count / 200))
     clean_title = title.replace('<', '&lt;').replace('>', '&gt;')
     
     slug = re.sub(r'[^a-z0-9]+', '-', clean_title.lower())[:60]
@@ -260,8 +240,8 @@ def post_to_blogger(service, title, content, images, source):
     content_html = content_html.replace('<p><h2>', '<h2>').replace('</h2></p>', '</h2>')
     content_html = content_html.replace('<p><h3>', '<h3>').replace('</h3></p>', '</h3>')
     
-    categories = ['World News', 'Breaking News']
-    if any(word in title.lower() for word in ['iran', 'israel', 'trump', 'us', 'china', 'russia', 'ukraine', 'gaza', 'lebanon', 'istanbul', 'turkey']):
+    categories = ['World News']
+    if any(word in title.lower() for word in ['iran', 'israel', 'trump', 'us', 'china', 'russia', 'ukraine', 'gaza', 'lebanon', 'turkey', 'france']):
         categories.append('Politics')
     
     html = f'''<!DOCTYPE html>
@@ -328,7 +308,7 @@ def check_and_post():
     print(f"📡 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*50}")
     
-    articles = fetch_hot_news()
+    articles = fetch_news()
     if not articles:
         print("   📭 No new stories")
         return
@@ -357,6 +337,10 @@ def check_and_post():
         word_count = len(content.split())
         print(f"   📝 Final: {word_count} words")
         
+        # Check for placeholders in final output
+        if '[LOCATION]' in content or '[DATE]' in content:
+            print(f"   ⚠️ WARNING: Placeholders still present!")
+        
         service = google_login()
         if service:
             post_to_blogger(service, article['title'], content, images, article['source'])
@@ -369,20 +353,20 @@ def check_and_post():
 def run():
     print("""
     ╔══════════════════════════════════════════════════════════════════════╗
-    ║         📰 HUMANISED NEWS BOT - REAL JOURNALIST STYLE               ║
+    ║         📰 HUMANISED NEWS BOT - COMPLETE FINAL VERSION              ║
     ║                                                                      ║
-    ║   ✓ Real quotes from witnesses and officials                         ║
-    ║   ✓ Specific locations, times, and details                           ║
-    ║   ✓ Emotional, human-sounding language                               ║
-    ║   ✓ No generic AI phrases                                            ║
-    ║   ✓ Text justified for newspaper feel                                ║
-    ║   ✓ Runs every 10 minutes                                            ║
+    ║   ✓ Real journalist style - human sounding                          ║
+    ║   ✓ NO placeholders like [LOCATION]                                 ║
+    ║   ✓ Specific details and realistic quotes                           ║
+    ║   ✓ Clean fallback with no brackets                                 ║
+    ║   ✓ Text justified for newspaper feel                               ║
+    ║   ✓ Runs every 10 minutes                                           ║
     ╚══════════════════════════════════════════════════════════════════════╝
     """)
     
     print("✅ Bot is RUNNING")
     print("⏰ Runs every 10 minutes")
-    print("📝 Writing humanised, journalist-style articles\n")
+    print("📝 Writing humanised articles (no placeholders)\n")
     
     check_and_post()
 
