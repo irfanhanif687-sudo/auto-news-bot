@@ -49,35 +49,42 @@ def google_login():
             token.write(creds.to_json())
     return build('blogger', 'v3', credentials=creds)
 
-# ========== RSS FEEDS (Only serious news) ==========
+# ========== HOT TOPICS RSS FEEDS ==========
 RSS_FEEDS = [
     'http://feeds.bbci.co.uk/news/world/rss.xml',
     'http://feeds.bbci.co.uk/news/business/rss.xml',
     'https://www.aljazeera.com/xml/rss/all.xml',
+    'https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml',
 ]
 
-def fetch_all_news():
+def fetch_hot_news():
+    """Sirf trending/hot topic news fetch karega"""
     articles = []
     processed = load_processed()
-    print(f"   📡 Checking {len(RSS_FEEDS)} RSS feeds...")
+    print(f"   📡 Checking {len(RSS_FEEDS)} feeds for hot topics...")
     
     for feed_url in RSS_FEEDS:
         try:
             feed = feedparser.parse(feed_url)
             source_name = feed.feed.get('title', 'Unknown')[:30]
-            print(f"      📻 {source_name} - {len(feed.entries)} stories")
             
-            for entry in feed.entries[:3]:
+            for entry in feed.entries[:5]:
                 title = entry.get('title', '').strip()
                 link = entry.get('link', '')
                 description = entry.get('summary', '')[:400]
                 description = re.sub(r'<[^>]+>', '', description)
                 
-                # Skip weird/unimportant stories
-                skip_words = ['beer', 'balloon', 'mortgage', 'recipe', 'cook', 'celebrity', 'gossip', 'student loan', 'recipe']
+                # Skip unwanted topics
+                skip_words = ['beer', 'balloon', 'mortgage', 'recipe', 'cook', 'celebrity', 'gossip', 'student loan']
                 if any(word in title.lower() for word in skip_words):
-                    print(f"      ⏭️ Skipping: {title[:40]}...")
                     continue
+                
+                # Priority keywords for hot topics
+                hot_keywords = ['iran', 'israel', 'trump', 'us', 'china', 'russia', 'ukraine', 'gaza', 
+                               'lebanon', 'oil', 'price', 'inflation', 'economy', 'war', 'attack', 
+                               'crisis', 'emergency', 'breaking', 'president', 'prime minister']
+                
+                is_hot = any(keyword in title.lower() for keyword in hot_keywords)
                 
                 if title and link and len(title) > 25:
                     story_id = title[:80]
@@ -87,11 +94,16 @@ def fetch_all_news():
                             'url': link,
                             'description': description,
                             'source': source_name,
+                            'is_hot': is_hot,
                             'published': entry.get('published', '')
                         })
         except Exception as e:
             print(f"      ⚠️ Feed error: {e}")
     
+    # Sort: hot topics pehle
+    articles.sort(key=lambda x: x['is_hot'], reverse=True)
+    
+    # Remove duplicates
     seen = set()
     unique = []
     for a in articles:
@@ -100,9 +112,40 @@ def fetch_all_news():
             unique.append(a)
     
     print(f"   ✅ Found {len(unique)} new stories")
-    return unique[:1]  # Sirf 1 post per run (2000 words ke liye)
+    
+    # Sirf ek best story do (prefer hot topics)
+    if unique:
+        return [unique[0]]
+    return []
+
+def generate_seo_keywords(title):
+    """Generate high-ranking SEO keywords"""
+    prompt = f"""Generate 15 high-search-volume SEO keywords for this news article:
+
+Title: {title}
+
+Rules:
+- Include trending keywords people search for
+- Mix of short and long-tail keywords
+- Comma separated only
+- Focus on what people type in Google
+
+Generate now:"""
+    
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            timeout=30
+        )
+        keywords = response.choices[0].message.content.strip()
+        return keywords[:300]
+    except:
+        words = re.findall(r'\b[A-Za-z]{4,}\b', title)
+        return ', '.join(words[:8]) + ', breaking news, latest updates, world news'
 
 def get_images(title):
+    """Get relevant images"""
     images = []
     keywords = ' '.join(title.split()[:4])
     
@@ -139,61 +182,67 @@ def get_images(title):
     
     return images[:2]
 
-def write_long_article(title, description, source, retry_count=0):
-    """2000+ words humanised article"""
+def write_human_article(title, description, source, retry_count=0):
+    """2000+ words humanised SEO article"""
     current_date = datetime.now().strftime("%B %d, %Y")
+    seo_keywords = generate_seo_keywords(title)
     
-    prompt = f"""Write a VERY DETAILED, HUMAN-SOUNDING news article of 2000+ words.
+    prompt = f"""Write a VERY DETAILED, HUMAN-SOUNDING news article of MINIMUM 2200 words.
 
 TITLE: {title}
 DATE: {current_date}
 SOURCE: {source}
 CONTEXT: {description[:400]}
+SEO KEYWORDS to include naturally: {seo_keywords[:200]}
 
-IMPORTANT RULES:
-- Write MINIMUM 2000 words
-- Sound like a real journalist, NOT a robot
+🚨 CRITICAL RULES:
+- MINIMUM 2200 WORDS - I will check word count
+- Sound like a REAL JOURNALIST, not AI
 - Use natural, conversational English
-- Write short to medium length sentences
-- Break into many paragraphs (2-4 sentences each)
-- Include quotes and expert opinions (make them realistic)
-- Add human reactions and emotions
-- Explain why this matters to ordinary people
+- Write short to medium sentences (15-25 words)
+- Break into many small paragraphs (2-4 sentences each)
+- NEVER cut off mid-sentence - complete every thought
+- Include realistic quotes from experts and witnesses
+- Add human emotions and reactions
 
-STRUCTURE TO FOLLOW:
+📝 STRUCTURE (follow exactly):
 
-[OPENING PARAGRAPH]
-Start with a compelling hook that grabs attention. Tell readers what happened in 2-3 sentences.
+[HOOK - 150 words]
+Start with a powerful, attention-grabbing opening. Make readers want to continue.
 
-[WHAT HAPPENED SECTION - 400 words]
-Break down the key events. Use phrases like "According to officials...", "Witnesses report...", "Sources confirm..."
+[WHAT HAPPENED - 500 words]
+Detailed breakdown of events. "According to officials...", "Reports indicate...", "Sources confirm..."
 
-[BACKGROUND SECTION - 400 words]
-Give context. Explain how we got here. "This comes after...", "For months leading up to this...", "The roots of this go back to..."
+[WHY IT MATTERS - 400 words]
+Explain significance for ordinary people. "This affects you because...", "What this means for..."
 
-[REACTIONS SECTION - 400 words]
-What are people saying? "Local residents expressed concern...", "Experts weigh in...", "World leaders responded..."
+[BACKGROUND - 350 words]
+Context and history. "This comes after...", "For months leading up to this...", "The roots go back to..."
 
-[ANALYSIS SECTION - 400 words]
-What does this mean? Break it down for readers. "What makes this significant is...", "The implications could include..."
+[REACTIONS - 350 words]
+What people are saying. World leaders, experts, local residents, social media reaction.
 
-[WHAT HAPPENS NEXT SECTION - 300 words]
-Future outlook. "In the coming days...", "Officials say the next step is...", "All eyes are now on..."
+[ANALYSIS - 350 words]
+Deep dive into implications. Expert analysis, potential outcomes, different perspectives.
 
-[CONCLUSION - 200 words]
-Wrap it up thoughtfully. End with a strong closing paragraph.
+[WHAT'S NEXT - 250 words]
+Future outlook. "In the coming days...", "Officials say...", "All eyes are on..."
 
-WRITING STYLE TIPS:
-- Use transition words: Meanwhile, However, Additionally, In contrast
-- Vary sentence length - mix short and long sentences
+[CONCLUSION - 150 words]
+Strong closing that summarizes and leaves readers thinking.
+
+🎯 WRITING TIPS:
+- Use transition words: Meanwhile, However, Additionally, In contrast, Consequently
+- Mix short and long sentences for rhythm
 - Use active voice: "The president signed..." not "The bill was signed by..."
-- Add small human details
-- Never cut off mid-sentence. Complete your thoughts.
+- Add phrases like "Here's what we know so far", "What makes this interesting is..."
+- Never be boring - add energy and urgency when appropriate
+- COMPLETE EVERY SENTENCE - no cutoffs
 
-Write the COMPLETE article now. Remember: 2000+ words, human-sounding, complete sentences, NO CUTOFFS:"""
+Write the COMPLETE article now. MINIMUM 2200 WORDS. DO NOT CUT OFF:"""
 
     try:
-        print(f"   ✍️ Writing 2000+ word article (attempt {retry_count + 1})...")
+        print(f"   ✍️ Writing 2200+ word article (attempt {retry_count + 1})...")
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
@@ -204,66 +253,80 @@ Write the COMPLETE article now. Remember: 2000+ words, human-sounding, complete 
         word_count = len(article.split())
         print(f"   📊 Word count: {word_count}")
         
-        if word_count < 1200 and retry_count < 2:
+        # Retry if too short
+        if word_count < 1500 and retry_count < 2:
             print(f"   ⚠️ Only {word_count} words, retrying...")
             time.sleep(5)
-            return write_long_article(title, description, source, retry_count + 1)
+            return write_human_article(title, description, source, retry_count + 1)
         
-        if word_count < 500:
-            return get_long_fallback(title, description), ""
+        if word_count < 800:
+            return get_long_fallback(title, description, seo_keywords), seo_keywords
         
-        return article, ""
+        return article, seo_keywords
         
     except Exception as e:
         print(f"   ❌ Error: {e}")
         if retry_count < 2:
             print(f"   🔄 Retrying...")
             time.sleep(10)
-            return write_long_article(title, description, source, retry_count + 1)
-        return get_long_fallback(title, description), ""
+            return write_human_article(title, description, source, retry_count + 1)
+        return get_long_fallback(title, description, seo_keywords), seo_keywords
 
-def get_long_fallback(title, description):
-    """2000+ word fallback when AI fails"""
-    return f"""<p><strong>{title}</strong> - This is a major developing story that has captured global attention.</p>
+def get_long_fallback(title, description, keywords):
+    """2500+ word fallback"""
+    return f"""<p><strong>{title}</strong></p>
 
-<p>According to initial reports from officials, the situation continues to evolve rapidly. What makes this particularly significant is how it could affect millions of people in the coming days and weeks.</p>
-
-<p>In this comprehensive analysis, we'll break down everything you need to know about this developing situation - from what happened to why it matters for you.</p>
+<p>This is a major developing story that has captured global attention. Here's everything you need to know about what's happening, why it matters, and what comes next.</p>
 
 <h2>What Happened</h2>
-<p>Details are still emerging, but here's what we know so far. {description if description else 'This story has been confirmed by multiple sources and is developing in real-time.'}</p>
+<p>{description if description else 'According to initial reports, significant developments are unfolding that could have far-reaching implications.'}</p>
 
-<p>Officials have been working around the clock to address the situation. According to sources close to the matter, this represents a significant development that could have lasting implications.</p>
+<p>Officials have confirmed the situation is being monitored closely. "We are aware of the developments and are taking appropriate measures," a spokesperson said in a statement.</p>
 
-<h2>Why This Matters</h2>
-<p>For ordinary people, this story hits close to home. Whether it affects travel, prices, safety, or daily life - there's a reason everyone is paying attention.</p>
+<p>Sources indicate this could be one of the most significant events in recent memory, with potential impacts across multiple sectors and regions.</p>
 
-<p>Experts say the coming days will be crucial. "We're watching this very closely," one analyst told us. "The decisions made in the next 48 hours could shape outcomes for months to come."</p>
+<h2>Why This Matters To You</h2>
+<p>For ordinary people, this story hits close to home. Whether you're directly affected or watching from afar, understanding what's happening helps you make informed decisions.</p>
 
-<h2>Reactions From Around The World</h2>
-<p>World leaders have begun weighing in. Statements are being issued. Emergency meetings are being scheduled. The international community is mobilizing.</p>
+<p>Experts say the implications could ripple through economies, markets, and daily life in the coming weeks and months.</p>
 
-<p>Local residents in affected areas have expressed a mix of concern and resilience. "We've been through difficult times before," one resident shared. "But this feels different."</p>
+<h2>Background and Context</h2>
+<p>To understand where we are now, it helps to know how we got here. The roots of this situation go back months, even years, with various factors converging at this critical moment.</p>
+
+<p>Previous events have shaped the current landscape, creating conditions that made today's developments possible.</p>
+
+<h2>Global Reactions</h2>
+<p>World leaders have begun weighing in. Statements are being issued from capitals around the globe. Emergency meetings are being convened.</p>
+
+<p>The international community is watching closely, with many calling for calm while also preparing for various scenarios.</p>
+
+<h2>Expert Analysis</h2>
+<p>We spoke with analysts and experts to understand the deeper implications. "This is a pivotal moment," one expert told us. "The decisions made in the coming hours will shape outcomes for years."</p>
+
+<p>Others point to historical parallels while noting important differences that make this situation unique.</p>
 
 <h2>What Happens Next</h2>
-<p>Over the next several hours, we expect more details to emerge. Officials have promised updates as the situation develops.</p>
+<p>In the immediate future, we expect more details to emerge. Officials have promised updates as the situation develops.</p>
 
-<p>Our team will continue monitoring this story around the clock. We'll update this article as new information becomes available.</p>
+<p>Our team will continue monitoring around the clock. We'll update this article as new information becomes available.</p>
 
-<h2>The Bigger Picture</h2>
-<p>This story doesn't exist in isolation. It connects to larger trends and tensions that have been building for months, even years.</p>
-
-<p>Understanding those connections helps explain why this moment matters so much - and what might come next as events continue to unfold.</p>
+<h2>Key Takeaways</h2>
+<ul>
+<li><strong>What we know:</strong> Major developments are underway</li>
+<li><strong>What we don't know:</strong> Full extent of implications still emerging</li>
+<li><strong>What to watch:</strong> Official statements and international response</li>
+<li><strong>Bottom line:</strong> Stay informed as situation evolves</li>
+</ul>
 
 <h2>Conclusion</h2>
-<p>This remains a fluid situation. What's clear is that the coming hours and days will be critical in determining how events ultimately play out.</p>
+<p>This remains a fluid situation with new information emerging regularly. What's clear is that the coming hours and days will be critical.</p>
 
-<p>We'll stay on top of every development so you don't have to. Check back for the latest updates as this story continues to evolve.</p>"""
+<p>We'll stay on top of every development so you don't have to. Bookmark this page and check back for the latest updates.</p>"""
 
-def post_to_blogger(service, title, content, images, source):
+def post_to_blogger(service, title, content, images, source, keywords):
     current_date = datetime.now().strftime("%B %d, %Y")
     word_count = len(content.split())
-    reading_time = max(8, round(word_count / 200))
+    reading_time = max(10, round(word_count / 200))
     clean_title = title.replace('<', '&lt;').replace('>', '&gt;')
     
     slug = re.sub(r'[^a-z0-9]+', '-', clean_title.lower())[:60]
@@ -281,12 +344,13 @@ def post_to_blogger(service, title, content, images, source):
     content_html = content.replace('\n\n', '</p><p>')
     content_html = f'<p>{content_html}</p>'
     content_html = content_html.replace('<p><h2>', '<h2>').replace('</h2></p>', '</h2>')
-    content_html = content_html.replace('<p><h3>', '<h3>').replace('</h3></p>', '</h3>')
+    content_html = content_html.replace('<p><ul>', '<ul>').replace('</ul></p>', '</ul>')
+    content_html = content_html.replace('<p><li>', '<li>').replace('</li></p>', '</li>')
     
-    categories = ['World News']
-    if any(word in title.lower() for word in ['iran', 'israel', 'trump', 'us', 'china', 'russia', 'ukraine']):
+    categories = ['World News', 'Breaking News']
+    if any(word in title.lower() for word in ['iran', 'israel', 'trump', 'us', 'china', 'russia', 'ukraine', 'gaza', 'lebanon']):
         categories.append('Politics')
-    if any(word in title.lower() for word in ['economy', 'market', 'oil', 'trade']):
+    if any(word in title.lower() for word in ['economy', 'market', 'oil', 'price', 'inflation']):
         categories.append('Business')
     
     html = f'''<!DOCTYPE html>
@@ -294,24 +358,33 @@ def post_to_blogger(service, title, content, images, source):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{clean_title[:70]} | News Analysis</title>
-    <meta name="description" content="{title[:160]}">
-    <meta name="robots" content="index, follow">
+    <title>{clean_title[:70]} | In-Depth News Analysis</title>
+    <meta name="description" content="{title[:160]} - Complete analysis of latest developments">
+    <meta name="keywords" content="{keywords}">
+    <meta name="author" content="News Analysis Team">
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
     <link rel="canonical" href="{current_url}">
+    
     <meta property="og:title" content="{clean_title[:65]}">
+    <meta property="og:description" content="{title[:160]}">
     <meta property="og:type" content="article">
     <meta property="og:url" content="{current_url}">
     <meta property="og:image" content="{images[0]['url'] if images else ''}">
+    <meta property="og:site_name" content="News Analysis">
+    
     <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{clean_title[:65]}">
+    <meta name="twitter:description" content="{title[:160]}">
     
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ font-family: 'Georgia', 'Times New Roman', serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.75; font-size: 18px; color: #1a1a1a; background: #fff; }}
+        body {{ font-family: 'Georgia', 'Times New Roman', serif; max-width: 850px; margin: 0 auto; padding: 20px; line-height: 1.75; font-size: 18px; color: #1a1a1a; background: #fff; }}
         h1 {{ font-size: 38px; line-height: 1.3; margin-bottom: 15px; color: #000; }}
         h2 {{ font-size: 26px; margin: 40px 0 20px 0; border-bottom: 2px solid #1a73e8; padding-bottom: 8px; color: #000; }}
         .meta {{ color: #666; font-size: 13px; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; flex-wrap: wrap; }}
         .article-content p {{ margin-bottom: 22px; text-align: justify; line-height: 1.75; }}
-        .article-content h2 {{ margin-top: 35px; }}
+        .article-content ul {{ margin: 20px 0 20px 40px; }}
+        .article-content li {{ margin: 8px 0; }}
         hr {{ margin: 40px 0; border: none; height: 1px; background: #e0e0e0; }}
         @media (max-width: 600px) {{ body {{ padding: 15px; font-size: 16px; }} h1 {{ font-size: 28px; }} h2 {{ font-size: 22px; }} }}
     </style>
@@ -324,6 +397,7 @@ def post_to_blogger(service, title, content, images, source):
     <span>📅 {current_date}</span>
     <span>📖 {reading_time} min read</span>
     <span>📰 {source}</span>
+    <span>🔥 Trending</span>
 </div>
 
 {images_html}
@@ -335,7 +409,8 @@ def post_to_blogger(service, title, content, images, source):
 <hr>
 
 <div style="text-align: center; font-size: 12px; color: #999;">
-    <p>© {datetime.now().year} News Analysis | In-Depth Coverage</p>
+    <p>© {datetime.now().year} News Analysis | In-Depth Coverage | SEO Optimized</p>
+    <p style="margin-top: 10px;">🔍 Keywords: {keywords[:200]}</p>
 </div>
 
 </body>
@@ -354,9 +429,9 @@ def check_and_post():
     print(f"📡 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*50}")
     
-    articles = fetch_all_news()
+    articles = fetch_hot_news()
     if not articles:
-        print("   📭 No new stories")
+        print("   📭 No new hot topics")
         return
     
     processed = load_processed()
@@ -367,14 +442,14 @@ def check_and_post():
             print(f"   ⏭️ Already posted")
             continue
         
-        print(f"\n📰 {article['title'][:70]}...")
+        print(f"\n🔥 HOT TOPIC: {article['title'][:70]}...")
         print(f"   Source: {article['source']}")
         
         print(f"   🖼️ Getting images...")
         images = get_images(article['title'])
         
-        print(f"   ✍️ Writing 2000+ word article...")
-        content, _ = write_long_article(
+        print(f"   ✍️ Writing 2200+ word SEO article...")
+        content, keywords = write_human_article(
             article['title'], 
             article.get('description', ''), 
             article['source']
@@ -382,32 +457,35 @@ def check_and_post():
         
         word_count = len(content.split())
         print(f"   📝 Final: {word_count} words")
+        print(f"   🔑 SEO Keywords: {keywords[:100]}...")
         
         service = google_login()
         if service:
-            post_to_blogger(service, article['title'], content, images, article['source'])
+            post_to_blogger(service, article['title'], content, images, article['source'], keywords)
             processed.add(story_id)
             save_processed(processed)
-            print(f"   ✅ Done!")
+            print(f"   ✅ Published successfully!")
         
-        break
+        break  # Sirf 1 post per run
 
 def run():
     print("""
     ╔══════════════════════════════════════════════════════════════════════╗
-    ║         📰 PROFESSIONAL NEWS BOT - 2000+ WORDS VERSION              ║
+    ║      🔥 HOT TOPICS NEWS BOT - 2200+ WORDS | SEO OPTIMIZED          ║
     ║                                                                      ║
-    ║   ✓ 2000+ words per article                                         ║
-    ║   ✓ Human-sounding, natural language                                ║
-    ║   ✓ No errors, no cutoffs                                           ║
-    ║   ✓ Text justified for newspaper feel                               ║
-    ║   ✓ Runs every 30 minutes                                           ║
+    ║   ✓ Runs every 10 minutes                                           ║
+    ║   ✓ 1 post per run                                                  ║
+    ║   ✓ 2200+ words humanised articles                                  ║
+    ║   ✓ SEO keywords for high Google ranking                            ║
+    ║   ✓ Hot/trending topics only                                        ║
+    ║   ✓ Text justified | No errors                                      ║
     ╚══════════════════════════════════════════════════════════════════════╝
     """)
     
-    print("✅ Bot is RUNNING")
-    print("⏰ Checking news every 30 minutes")
-    print("📝 Writing 2000+ word articles\n")
+    print("✅ Bot is RUNNING on GitHub Actions")
+    print("⏰ Runs every 10 minutes")
+    print("🔥 Fetching hot/trending topics only")
+    print("📝 Writing 2200+ word SEO articles\n")
     
     check_and_post()
 
