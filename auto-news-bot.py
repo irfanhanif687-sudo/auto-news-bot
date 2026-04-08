@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 # ========== SETTINGS ==========
 BLOG_ID = "4233785800723613713"
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "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")
+OPENROUTER_API_KEY = "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"
 PEXELS_API_KEY = "u6bM6qc8OrJn3i4hLakLPVnHduO1KsSoguJExJRZcaOMUmhR7xAYZ8A9"
 # ==============================
 
@@ -123,7 +123,7 @@ def get_images(title):
     return images[:2]
 
 def write_article(title, description, source, retry=0):
-    """Write article using OpenRouter's free Gemini 2.5 Pro"""
+    """Write article using OpenRouter's free models"""
     current_date = datetime.now().strftime("%B %d, %Y")
     
     prompt = f"""Write a complete, human-sounding news article.
@@ -139,7 +139,6 @@ REQUIREMENTS:
 - Add realistic quotes
 - Short paragraphs (2-4 sentences)
 - NO placeholders
-- NO generic phrases
 - Strong opening, natural ending
 
 Write the complete article now:"""
@@ -147,6 +146,7 @@ Write the complete article now:"""
     try:
         print(f"   ✍️ Writing article via OpenRouter...")
         
+        # Updated model name - working free model
         response = requests.post(
             url="https://openrouter.ai/api/v1/chat/completions",
             headers={
@@ -154,7 +154,7 @@ Write the complete article now:"""
                 "Content-Type": "application/json",
             },
             json={
-                "model": "google/gemini-2.5-pro-exp-03-25:free",
+                "model": "google/gemini-2.0-flash-exp:free",
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.7,
                 "max_tokens": 8000,
@@ -169,6 +169,7 @@ Write the complete article now:"""
             return article
         else:
             print(f"   ❌ API Error: {response.status_code}")
+            print(f"   Response: {response.text[:200]}")
             if retry < 2:
                 time.sleep(5)
                 return write_article(title, description, source, retry + 1)
@@ -179,7 +180,8 @@ Write the complete article now:"""
             time.sleep(5)
             return write_article(title, description, source, retry + 1)
     
-    return f"<p>{title}</p><p>{description}</p>"
+    # Fallback
+    return f"<p><strong>{title}</strong></p><p>{description}</p><p>This article will be updated.</p>"
 
 def post_to_blogger(service, title, content, images, source):
     current_date = datetime.now().strftime("%B %d, %Y")
@@ -228,7 +230,7 @@ def run():
     ╔══════════════════════════════════════════════════════════════════════╗
     ║      📰 OPENROUTER NEWS BOT - 2000+ WORDS | FREE | WORKING          ║
     ║                                                                      ║
-    ║   ✓ Gemini 2.5 Pro via OpenRouter (free)                            ║
+    ║   ✓ Gemini 2.0 Flash via OpenRouter (free)                          ║
     ║   ✓ 2000+ words humanised articles                                  ║
     ║   ✓ 2 images from Pexels                                            ║
     ║   ✓ Text justified | No errors                                      ║
