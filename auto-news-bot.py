@@ -5,7 +5,6 @@ import os
 import json
 import re
 from datetime import datetime
-import google.generativeai as genai
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -14,12 +13,9 @@ from urllib.parse import quote
 
 # ========== SETTINGS ==========
 BLOG_ID = "4233785800723613713"
-GEMINI_API_KEY = "AIzaSyANCh0HbU1UqxsHEz3RdOYV80ESd8w-YfY"
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "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")
 PEXELS_API_KEY = "u6bM6qc8OrJn3i4hLakLPVnHduO1KsSoguJExJRZcaOMUmhR7xAYZ8A9"
 # ==============================
-
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-2.5-flash')
 
 PROCESSED_FILE = "processed_news.json"
 
@@ -127,36 +123,63 @@ def get_images(title):
     return images[:2]
 
 def write_article(title, description, source, retry=0):
+    """Write article using OpenRouter's free Gemini 2.5 Pro"""
     current_date = datetime.now().strftime("%B %d, %Y")
     
-    prompt = f"""Write a human-sounding news article.
+    prompt = f"""Write a complete, human-sounding news article.
 
 TITLE: {title}
 DATE: {current_date}
 SOURCE: {source}
 CONTEXT: {description[:500]}
 
-RULES:
-- 2000+ words
-- Natural, conversational
+REQUIREMENTS:
+- Write 2000+ words
+- Sound like a real journalist
 - Add realistic quotes
-- Short paragraphs
+- Short paragraphs (2-4 sentences)
 - NO placeholders
+- NO generic phrases
+- Strong opening, natural ending
 
-Write now:"""
+Write the complete article now:"""
 
     try:
-        print(f"   ✍️ Writing article...")
-        response = model.generate_content(prompt)
-        article = response.text
-        print(f"   📊 {len(article.split())} words")
-        return article
+        print(f"   ✍️ Writing article via OpenRouter...")
+        
+        response = requests.post(
+            url="https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "google/gemini-2.5-pro-exp-03-25:free",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.7,
+                "max_tokens": 8000,
+            },
+            timeout=180
+        )
+        
+        if response.status_code == 200:
+            article = response.json()['choices'][0]['message']['content']
+            word_count = len(article.split())
+            print(f"   📊 {word_count} words")
+            return article
+        else:
+            print(f"   ❌ API Error: {response.status_code}")
+            if retry < 2:
+                time.sleep(5)
+                return write_article(title, description, source, retry + 1)
+            
     except Exception as e:
         print(f"   ❌ Error: {e}")
         if retry < 2:
             time.sleep(5)
             return write_article(title, description, source, retry + 1)
-        return f"<p>{title}</p><p>{description}</p>"
+    
+    return f"<p>{title}</p><p>{description}</p>"
 
 def post_to_blogger(service, title, content, images, source):
     current_date = datetime.now().strftime("%B %d, %Y")
@@ -169,46 +192,52 @@ def post_to_blogger(service, title, content, images, source):
     
     images_html = ""
     for img in images:
-        images_html += f'<img src="{img["url"]}" style="width:100%; margin:15px 0;">'
+        images_html += f'<img src="{img["url"]}" style="width:100%; margin:15px 0; border-radius:10px;">'
     
     content_html = content.replace('\n\n', '</p><p>')
     content_html = f'<p>{content_html}</p>'
     
     html = f'''<!DOCTYPE html>
 <html>
-<head><title>{clean_title[:70]}</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-body {{ font-family: Georgia; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.7; }}
-h1 {{ font-size: 36px; }}
-p {{ text-align: justify; margin-bottom: 20px; }}
-</style>
+<head>
+    <title>{clean_title[:70]} | News Analysis</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {{ font-family: Georgia; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.7; font-size: 18px; }}
+        h1 {{ font-size: 36px; }}
+        p {{ text-align: justify; margin-bottom: 20px; }}
+        @media (max-width: 600px) {{ body {{ padding: 15px; font-size: 16px; }} h1 {{ font-size: 28px; }} }}
+    </style>
 </head>
 <body>
-<h1>{clean_title}</h1>
-<p>📅 {current_date} | 📖 {reading_time} min read | 📰 {source}</p>
-{images_html}
-<div>{content_html}</div>
-<hr>
-<p>© {datetime.now().year} News Analysis</p>
+    <h1>{clean_title}</h1>
+    <p>📅 {current_date} | 📖 {reading_time} min read | 📰 {source}</p>
+    {images_html}
+    <div>{content_html}</div>
+    <hr>
+    <p>© {datetime.now().year} News Analysis</p>
 </body>
 </html>'''
     
     post = service.posts().insert(blogId=BLOG_ID, body={'title': clean_title[:70], 'content': html}, isDraft=False).execute()
-    print(f"   ✅ Published")
+    print(f"   ✅ Published: {post.get('url')}")
     return post
 
 def run():
     print("""
     ╔══════════════════════════════════════════════════════════════════════╗
-    ║         📰 GEMINI NEWS BOT - 2000+ WORDS | FREE                     ║
+    ║      📰 OPENROUTER NEWS BOT - 2000+ WORDS | FREE | WORKING          ║
     ║                                                                      ║
+    ║   ✓ Gemini 2.5 Pro via OpenRouter (free)                            ║
     ║   ✓ 2000+ words humanised articles                                  ║
-    ║   ✓ 2 images per post                                               ║
-    ║   ✓ Text justified                                                  ║
+    ║   ✓ 2 images from Pexels                                            ║
+    ║   ✓ Text justified | No errors                                      ║
     ║   ✓ NO credit card required                                         ║
     ╚══════════════════════════════════════════════════════════════════════╝
     """)
+    
+    print("✅ Bot is RUNNING")
+    print("📝 Writing 2000+ word humanised articles via OpenRouter\n")
     
     articles = fetch_news()
     if not articles:
