@@ -2,7 +2,7 @@ name: Auto News Blogger
 
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -19,9 +19,13 @@ jobs:
         python-version: '3.11'
     
     - name: Install dependencies
-      run: pip install requests feedparser groq google-auth google-auth-oauthlib google-api-python-client
+      run: |
+        pip install requests feedparser google-auth google-auth-oauthlib google-api-python-client
+        pip install google-generativeai
     
     - name: Run News Bot
+      env:
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       run: python auto-news-bot.py
     
     - name: Commit processed news
