@@ -125,7 +125,7 @@ def get_images(title):
 def write_article(title, description, source, retry=0):
     current_date = datetime.now().strftime("%B %d, %Y")
     
-    prompt = f"""Write a complete, human-sounding news article.
+    prompt = f"""Write a detailed, human-sounding news article.
 
 TITLE: {title}
 DATE: {current_date}
@@ -135,15 +135,15 @@ CONTEXT: {description[:500]}
 REQUIREMENTS:
 - Write 2000+ words
 - Sound like a real journalist
-- Add realistic quotes
-- Short paragraphs (2-4 sentences)
+- Add realistic quotes from witnesses/experts
+- Use short paragraphs (2-4 sentences)
 - NO placeholders
 - Strong opening, natural ending
 
 Write the complete article now:"""
 
     try:
-        print(f"   ✍️ Writing article via OpenRouter...")
+        print(f"   ✍️ Writing article via OpenRouter (Llama 4)...")
         
         response = requests.post(
             url="https://openrouter.ai/api/v1/chat/completions",
@@ -152,22 +152,27 @@ Write the complete article now:"""
                 "Content-Type": "application/json",
             },
             json={
-                "model": "google/gemini-2.0-flash-exp:free",
+                "model": "meta-llama/llama-4-maverick:free",  # Better for long articles
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.7,
                 "max_tokens": 8000,
             },
-            timeout=180
+            timeout=240
         )
         
         if response.status_code == 200:
             article = response.json()['choices'][0]['message']['content']
             word_count = len(article.split())
             print(f"   📊 {word_count} words")
+            
+            if word_count < 500 and retry < 2:
+                print(f"   ⚠️ Too short, retrying...")
+                time.sleep(5)
+                return write_article(title, description, source, retry + 1)
+            
             return article
         else:
             print(f"   ❌ API Error: {response.status_code}")
-            print(f"   Response: {response.text[:200]}")
             if retry < 2:
                 time.sleep(5)
                 return write_article(title, description, source, retry + 1)
@@ -178,8 +183,7 @@ Write the complete article now:"""
             time.sleep(5)
             return write_article(title, description, source, retry + 1)
     
-    # Fallback - ensure content is not empty
-    return f"<p><strong>{title}</strong></p><p>{description}</p><p>This is a developing story. Check back for updates.</p>"
+    return f"<p><strong>{title}</strong></p><p>{description}</p>"
 
 def post_to_blogger(service, title, content, images, source):
     current_date = datetime.now().strftime("%B %d, %Y")
@@ -187,7 +191,6 @@ def post_to_blogger(service, title, content, images, source):
     reading_time = max(8, round(word_count / 200))
     clean_title = title.replace('<', '&lt;').replace('>', '&gt;')
     
-    # Create SEO-friendly slug
     slug = re.sub(r'[^a-z0-9]+', '-', clean_title.lower())[:60]
     current_url = f"https://newnews4public.blogspot.com/{datetime.now().year}/{datetime.now().month}/{slug}.html"
     
@@ -195,61 +198,45 @@ def post_to_blogger(service, title, content, images, source):
     for img in images:
         images_html += f'<img src="{img["url"]}" style="width:100%; margin:15px 0; border-radius:10px;">'
     
-    # Process content - ensure it has proper HTML
     content_html = content.replace('\n\n', '</p><p>')
     content_html = f'<p>{content_html}</p>'
     content_html = content_html.replace('<p><h2>', '<h2>').replace('</h2></p>', '</h2>')
     
-    # Add more structure for better readability
     html = f'''<!DOCTYPE html>
 <html>
 <head>
     <title>{clean_title[:70]} | News Analysis</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="{title[:160]}">
-    <meta name="robots" content="index, follow">
     <link rel="canonical" href="{current_url}">
     <style>
-        body {{ font-family: 'Georgia', 'Times New Roman', serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.7; font-size: 18px; color: #1a1a1a; }}
-        h1 {{ font-size: 36px; margin-bottom: 15px; color: #000; }}
+        body {{ font-family: Georgia; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.7; font-size: 18px; }}
+        h1 {{ font-size: 36px; }}
         h2 {{ font-size: 28px; margin: 35px 0 15px 0; border-bottom: 2px solid #1a73e8; padding-bottom: 8px; }}
-        .meta {{ color: #666; font-size: 13px; margin-bottom: 25px; border-bottom: 1px solid #e0e0e0; padding-bottom: 15px; }}
-        p {{ text-align: justify; margin-bottom: 22px; line-height: 1.7; }}
-        hr {{ margin: 40px 0; border: none; height: 1px; background: #e0e0e0; }}
-        @media (max-width: 600px) {{ body {{ padding: 15px; font-size: 16px; }} h1 {{ font-size: 28px; }} h2 {{ font-size: 22px; }} }}
+        p {{ text-align: justify; margin-bottom: 20px; }}
+        @media (max-width: 600px) {{ body {{ padding: 15px; font-size: 16px; }} h1 {{ font-size: 28px; }} }}
     </style>
 </head>
 <body>
     <h1>{clean_title}</h1>
-    <div class="meta">
-        <span>📅 {current_date}</span>
-        <span>📖 {reading_time} min read</span>
-        <span>📰 {source}</span>
-    </div>
+    <p>📅 {current_date} | 📖 {reading_time} min read | 📰 {source}</p>
     {images_html}
-    <div class="content">
-        {content_html}
-    </div>
+    <div>{content_html}</div>
     <hr>
-    <p style="text-align: center; font-size: 12px; color: #999;">© {datetime.now().year} News Analysis | In-Depth Coverage</p>
+    <p>© {datetime.now().year} News Analysis</p>
 </body>
 </html>'''
     
-    # Post to Blogger
-    post = service.posts().insert(
-        blogId=BLOG_ID,
-        body={'title': clean_title[:70], 'content': html},
-        isDraft=False
-    ).execute()
+    post = service.posts().insert(blogId=BLOG_ID, body={'title': clean_title[:70], 'content': html}, isDraft=False).execute()
     print(f"   ✅ Published: {post.get('url')}")
     return post
 
 def run():
     print("""
     ╔══════════════════════════════════════════════════════════════════════╗
-    ║      📰 OPENROUTER NEWS BOT - 2000+ WORDS | FREE | WORKING          ║
+    ║      📰 LLAMA 4 NEWS BOT - 2000+ WORDS | FREE | WORKING             ║
     ║                                                                      ║
-    ║   ✓ Gemini 2.0 Flash via OpenRouter (free)                          ║
+    ║   ✓ Llama 4 Maverick (Meta's best free model)                       ║
     ║   ✓ 2000+ words humanised articles                                  ║
     ║   ✓ 2 images from Pexels                                            ║
     ║   ✓ Text justified | No errors                                      ║
@@ -258,43 +245,29 @@ def run():
     """)
     
     print("✅ Bot is RUNNING")
-    print("📝 Writing 2000+ word humanised articles via OpenRouter\n")
+    print("📝 Writing 2000+ word articles via Llama 4\n")
     
     articles = fetch_news()
     if not articles:
-        print("📭 No new stories")
+        print("No news")
         return
     
     processed = load_processed()
     
-    for article in articles:
-        story_id = article['title'][:80]
-        if story_id in processed:
-            print(f"   ⏭️ Already posted: {article['title'][:50]}...")
+    for a in articles:
+        pid = a['title'][:80]
+        if pid in processed:
             continue
         
-        print(f"\n📰 {article['title'][:70]}...")
-        print(f"   Source: {article['source']}")
-        
-        print(f"   🖼️ Getting images...")
-        images = get_images(article['title'])
-        print(f"   ✅ {len(images)} images ready")
-        
-        print(f"   ✍️ Writing article...")
-        content = write_article(article['title'], article.get('description', ''), article['source'])
-        
-        word_count = len(content.split())
-        print(f"   📝 Final word count: {word_count} words")
+        print(f"\n📰 {a['title'][:60]}...")
+        images = get_images(a['title'])
+        content = write_article(a['title'], a.get('description', ''), a['source'])
         
         service = google_login()
         if service:
-            post_to_blogger(service, article['title'], content, images, article['source'])
-            processed.add(story_id)
+            post_to_blogger(service, a['title'], content, images, a['source'])
+            processed.add(pid)
             save_processed(processed)
-            print(f"   ✅ Published successfully!")
-        else:
-            print(f"   ❌ Failed to login to Blogger")
-        
         break
 
 if __name__ == "__main__":
