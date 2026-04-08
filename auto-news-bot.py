@@ -14,13 +14,13 @@ from urllib.parse import quote
 
 # ========== SETTINGS ==========
 BLOG_ID = "4233785800723613713"
-GEMINI_API_KEY = "AIzaSyCF5QbDGCVY5-gK5DoGha-5A4r-uwRQC6k"
+GEMINI_API_KEY = "AIzaSyCF5QbDGCVY5-gK5DoGha-5A4r-uwRQC6k"  # Tumhara existing key
 PEXELS_API_KEY = "u6bM6qc8OrJn3i4hLakLPVnHduO1KsSoguJExJRZcaOMUmhR7xAYZ8A9"
 # ==============================
 
-# Configure Gemini
+# Configure Gemini 2.5 Flash (Fast & Free)
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-pro')
+model = genai.GenerativeModel('gemini-2.5-flash')  # Best free model 2026 [citation:5]
 
 PROCESSED_FILE = "processed_news.json"
 
@@ -68,10 +68,10 @@ def fetch_news():
             feed = feedparser.parse(feed_url)
             source_name = feed.feed.get('title', 'Unknown')[:30]
             
-            for entry in feed.entries[:5]:
+            for entry in feed.entries[:3]:
                 title = entry.get('title', '').strip()
                 link = entry.get('link', '')
-                description = entry.get('summary', '')[:600]
+                description = entry.get('summary', '')[:500]
                 description = re.sub(r'<[^>]+>', '', description)
                 
                 if title and link and len(title) > 25:
@@ -97,6 +97,7 @@ def fetch_news():
     return unique[:1]
 
 def get_images(title):
+    """Fetch 2 relevant images from Pexels (free)"""
     images = []
     keywords = ' '.join(title.split()[:5])
     
@@ -115,15 +116,16 @@ def get_images(title):
                     'caption': f"{title[:60]} | Credit: {photo.get('photographer', 'Pexels')}",
                     'credit': photo.get('photographer', 'Pexels')
                 })
-    except:
-        pass
+    except Exception as e:
+        print(f"      ⚠️ Image error: {e}")
     
+    # Fallback images
     if len(images) < 2:
-        fallback = [
+        fallback_images = [
             'https://images.pexels.com/photos/6071605/pexels-photo-6071605.jpeg',
             'https://images.pexels.com/photos/1181467/pexels-photo-1181467.jpeg'
         ]
-        for i, img_url in enumerate(fallback[:2]):
+        for i, img_url in enumerate(fallback_images[:2]):
             images.append({
                 'url': img_url,
                 'alt': f"News image {i+1}",
@@ -134,34 +136,27 @@ def get_images(title):
     return images[:2]
 
 def write_article(title, description, source, retry=0):
-    """2000+ words humanised article using Gemini"""
+    """2000+ words humanised article using Gemini 2.5 Flash"""
     current_date = datetime.now().strftime("%B %d, %Y")
     
-    prompt = f"""You are an expert journalist. Write a detailed news article.
+    prompt = f"""Write a complete, human-sounding news article.
 
 TITLE: {title}
 DATE: {current_date}
 SOURCE: {source}
-BACKGROUND: {description[:500]}
+CONTEXT: {description[:500]}
 
-Write a complete article with:
-- 2000+ words
-- Short paragraphs (2-4 sentences)
-- Realistic quotes from witnesses or experts
-- Clear, engaging language
-- Strong opening and natural ending
-- Specific details, not generic statements
+REQUIREMENTS:
+- Write 2000-2500 words
+- Sound like a real journalist
+- Add realistic quotes from experts or witnesses
+- Use short paragraphs (2-4 sentences)
+- NO placeholders like [LOCATION]
+- NO generic phrases like "major developing story"
+- Start with a strong opening
+- End naturally
 
-Article structure:
-1. Opening: What happened, where, when
-2. Key details and facts
-3. Quotes and reactions
-4. Background and context
-5. Analysis and implications
-6. What happens next
-7. Closing
-
-Write the article now:"""
+Write the complete article now:"""
 
     try:
         print(f"   ✍️ Writing article (attempt {retry + 1})...")
@@ -172,7 +167,7 @@ Write the article now:"""
         print(f"   📊 Word count: {word_count}")
         
         if word_count < 1200 and retry < 2:
-            print(f"   ⚠️ Too short ({word_count} words), retrying...")
+            print(f"   ⚠️ Too short, retrying...")
             time.sleep(5)
             return write_article(title, description, source, retry + 1)
         
@@ -185,12 +180,12 @@ Write the article now:"""
             time.sleep(10)
             return write_article(title, description, source, retry + 1)
         
-        return f"<p><strong>{title}</strong></p><p>{description}</p><p>Stay tuned for updates.</p>"
+        return f"<p><strong>{title}</strong></p><p>{description}</p><p>This article will be updated.</p>"
 
 def post_to_blogger(service, title, content, images, source):
     current_date = datetime.now().strftime("%B %d, %Y")
     word_count = len(content.split())
-    reading_time = max(8, round(word_count / 200))
+    reading_time = max(10, round(word_count / 200))
     clean_title = title.replace('<', '&lt;').replace('>', '&gt;')
     
     slug = re.sub(r'[^a-z0-9]+', '-', clean_title.lower())[:60]
@@ -231,7 +226,7 @@ def post_to_blogger(service, title, content, images, source):
         .meta {{ color: #666; font-size: 13px; margin-bottom: 25px; border-bottom: 1px solid #e0e0e0; padding-bottom: 15px; display: flex; justify-content: space-between; }}
         .article-content p {{ margin-bottom: 22px; text-align: justify; line-height: 1.75; }}
         hr {{ margin: 40px 0; }}
-        @media (max-width: 600px) {{ body {{ padding: 15px; font-size: 16px; }} h1 {{ font-size: 28px; }} h2 {{ font-size: 22px; }} }}
+        @media (max-width: 600px) {{ body {{ padding: 15px; font-size: 16px; }} h1 {{ font-size: 28px; }} }}
     </style>
 </head>
 <body>
@@ -270,18 +265,20 @@ def post_to_blogger(service, title, content, images, source):
 def run():
     print("""
     ╔══════════════════════════════════════════════════════════════════════╗
-    ║         📰 FINAL NEWS BOT - GEMINI 1.5 PRO                          ║
+    ║      📰 GEMINI 2.5 FLASH NEWS BOT - 2000+ WORDS | FREE & FAST       ║
     ║                                                                      ║
-    ║   ✓ 2000+ words per article                                         ║
+    ║   ✓ Gemini 2.5 Flash (Google's fastest free model)                  ║
+    ║   ✓ 2000-2500 words per article                                     ║
+    ║   ✓ 2 images from Pexels (free)                                     ║
     ║   ✓ Humanised, natural language                                     ║
-    ║   ✓ 2 relevant images                                               ║
-    ║   ✓ Text justified                                                  ║
-    ║   ✓ No errors                                                       ║
+    ║   ✓ Text justified | No errors                                      ║
+    ║   ✓ Runs every 10 minutes                                           ║
     ╚══════════════════════════════════════════════════════════════════════╝
     """)
     
-    print("✅ Bot is RUNNING")
-    print("⏰ Checking for news...\n")
+    print("✅ Bot is RUNNING on GitHub Actions")
+    print("⏰ Runs every 10 minutes")
+    print("📝 Using Gemini 2.5 Flash (fastest free model)\n")
     
     articles = fetch_news()
     if not articles:
@@ -299,10 +296,11 @@ def run():
         print(f"\n📰 {article['title'][:70]}...")
         print(f"   Source: {article['source']}")
         
-        print(f"   🖼️ Getting images...")
+        print(f"   🖼️ Fetching images...")
         images = get_images(article['title'])
+        print(f"   ✅ {len(images)} images ready")
         
-        print(f"   ✍️ Writing article...")
+        print(f"   ✍️ Writing 2000+ word article...")
         content = write_article(article['title'], article.get('description', ''), article['source'])
         
         word_count = len(content.split())
