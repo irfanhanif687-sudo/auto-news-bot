@@ -14,13 +14,13 @@ from urllib.parse import quote
 
 # ========== SETTINGS ==========
 BLOG_ID = "4233785800723613713"
-GEMINI_API_KEY = "AIzaSyCF5QbDGCVY5-gK5DoGha-5A4r-uwRQC6k"  # Tumhara existing key
+GEMINI_API_KEY = "AIzaSyD8ngtXOVMv0zMzu_ULQPVC2NZoBIxJyyY"
 PEXELS_API_KEY = "u6bM6qc8OrJn3i4hLakLPVnHduO1KsSoguJExJRZcaOMUmhR7xAYZ8A9"
 # ==============================
 
-# Configure Gemini 2.5 Flash (Fast & Free)
+# Configure Gemini
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-2.5-flash')  # Best free model 2026 [citation:5]
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 PROCESSED_FILE = "processed_news.json"
 
@@ -97,7 +97,6 @@ def fetch_news():
     return unique[:1]
 
 def get_images(title):
-    """Fetch 2 relevant images from Pexels (free)"""
     images = []
     keywords = ' '.join(title.split()[:5])
     
@@ -119,7 +118,6 @@ def get_images(title):
     except Exception as e:
         print(f"      ⚠️ Image error: {e}")
     
-    # Fallback images
     if len(images) < 2:
         fallback_images = [
             'https://images.pexels.com/photos/6071605/pexels-photo-6071605.jpeg',
@@ -135,28 +133,29 @@ def get_images(title):
     
     return images[:2]
 
-def write_article(title, description, source, retry=0):
-    """2000+ words humanised article using Gemini 2.5 Flash"""
+def write_human_article(title, description, source, retry=0):
+    """Write human-sounding article using Gemini 2.5 Flash"""
     current_date = datetime.now().strftime("%B %d, %Y")
     
-    prompt = f"""Write a complete, human-sounding news article.
+    prompt = f"""Write a news article that sounds like a real human journalist wrote it.
 
 TITLE: {title}
 DATE: {current_date}
 SOURCE: {source}
-CONTEXT: {description[:500]}
+BACKGROUND: {description[:500]}
 
-REQUIREMENTS:
+RULES:
 - Write 2000-2500 words
-- Sound like a real journalist
-- Add realistic quotes from experts or witnesses
-- Use short paragraphs (2-4 sentences)
+- Sound NATURAL, like a person telling a story
+- Use CONVERSATIONAL language
+- Add REALISTIC quotes from witnesses or experts
+- Write SHORT paragraphs (2-4 sentences)
+- START with a strong opening
+- END naturally
 - NO placeholders like [LOCATION]
 - NO generic phrases like "major developing story"
-- Start with a strong opening
-- End naturally
 
-Write the complete article now:"""
+Write the complete article now in a natural, human voice:"""
 
     try:
         print(f"   ✍️ Writing article (attempt {retry + 1})...")
@@ -166,10 +165,10 @@ Write the complete article now:"""
         word_count = len(article.split())
         print(f"   📊 Word count: {word_count}")
         
-        if word_count < 1200 and retry < 2:
+        if word_count < 1500 and retry < 2:
             print(f"   ⚠️ Too short, retrying...")
             time.sleep(5)
-            return write_article(title, description, source, retry + 1)
+            return write_human_article(title, description, source, retry + 1)
         
         return article
         
@@ -178,9 +177,9 @@ Write the complete article now:"""
         if retry < 2:
             print(f"   🔄 Retrying...")
             time.sleep(10)
-            return write_article(title, description, source, retry + 1)
+            return write_human_article(title, description, source, retry + 1)
         
-        return f"<p><strong>{title}</strong></p><p>{description}</p><p>This article will be updated.</p>"
+        return f"<p><strong>{title}</strong></p><p>{description}</p>"
 
 def post_to_blogger(service, title, content, images, source):
     current_date = datetime.now().strftime("%B %d, %Y")
@@ -195,14 +194,16 @@ def post_to_blogger(service, title, content, images, source):
     for img in images:
         images_html += f'''
         <figure style="text-align: center; margin: 25px 0;">
-            <img src="{img['url']}" alt="{img['alt'][:80]}" style="width:100%; max-width:750px; border-radius:12px;">
-            <figcaption style="font-size:12px; color:#666;">📷 {img['caption'][:80]}</figcaption>
+            <img src="{img['url']}" alt="{img['alt'][:80]}" style="width:100%; max-width:750px; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.1);" loading="lazy">
+            <figcaption style="font-size:12px; color:#666; margin-top:8px;">📷 {img['caption'][:80]}</figcaption>
         </figure>
         '''
     
     content_html = content.replace('\n\n', '</p><p>')
     content_html = f'<p>{content_html}</p>'
     content_html = content_html.replace('<p><h2>', '<h2>').replace('</h2></p>', '</h2>')
+    content_html = content_html.replace('<p><h3>', '<h3>').replace('</h3></p>', '</h3>')
+    content_html = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', content_html)
     
     html = f'''<!DOCTYPE html>
 <html lang="en">
@@ -217,16 +218,61 @@ def post_to_blogger(service, title, content, images, source):
     <meta property="og:type" content="article">
     <meta property="og:url" content="{current_url}">
     <meta property="og:image" content="{images[0]['url'] if images else ''}">
+    <meta name="twitter:card" content="summary_large_image">
     
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ font-family: 'Georgia', 'Times New Roman', serif; max-width: 850px; margin: 0 auto; padding: 20px; line-height: 1.75; font-size: 18px; color: #1a1a1a; background: #fff; }}
-        h1 {{ font-size: 38px; margin-bottom: 15px; }}
-        h2 {{ font-size: 28px; margin: 40px 0 20px 0; border-bottom: 2px solid #1a73e8; padding-bottom: 8px; }}
-        .meta {{ color: #666; font-size: 13px; margin-bottom: 25px; border-bottom: 1px solid #e0e0e0; padding-bottom: 15px; display: flex; justify-content: space-between; }}
-        .article-content p {{ margin-bottom: 22px; text-align: justify; line-height: 1.75; }}
-        hr {{ margin: 40px 0; }}
-        @media (max-width: 600px) {{ body {{ padding: 15px; font-size: 16px; }} h1 {{ font-size: 28px; }} }}
+        body {{ 
+            font-family: 'Georgia', 'Times New Roman', serif; 
+            max-width: 850px; 
+            margin: 0 auto; 
+            padding: 20px; 
+            line-height: 1.75; 
+            font-size: 18px; 
+            color: #1a1a1a; 
+            background: #fff; 
+        }}
+        h1 {{ 
+            font-size: 38px; 
+            line-height: 1.3; 
+            margin-bottom: 15px; 
+            color: #000; 
+            font-weight: bold;
+        }}
+        h2 {{ 
+            font-size: 28px; 
+            margin: 40px 0 20px 0; 
+            border-bottom: 3px solid #1a73e8; 
+            padding-bottom: 8px; 
+            color: #000; 
+        }}
+        .meta {{ 
+            color: #666; 
+            font-size: 13px; 
+            margin-bottom: 25px; 
+            padding-bottom: 15px; 
+            border-bottom: 1px solid #e0e0e0; 
+            display: flex; 
+            justify-content: space-between; 
+            flex-wrap: wrap; 
+        }}
+        .article-content p {{ 
+            margin-bottom: 22px; 
+            text-align: justify; 
+            line-height: 1.75; 
+        }}
+        .article-content h2 {{ margin-top: 35px; }}
+        hr {{ 
+            margin: 40px 0; 
+            border: none; 
+            height: 1px; 
+            background: linear-gradient(to right, transparent, #ccc, transparent); 
+        }}
+        @media (max-width: 600px) {{ 
+            body {{ padding: 15px; font-size: 16px; }} 
+            h1 {{ font-size: 28px; }} 
+            h2 {{ font-size: 22px; }} 
+        }}
     </style>
 </head>
 <body>
@@ -237,6 +283,7 @@ def post_to_blogger(service, title, content, images, source):
     <span>📅 {current_date}</span>
     <span>📖 {reading_time} min read</span>
     <span>📰 {source}</span>
+    <span>🔥 In-Depth</span>
 </div>
 
 {images_html}
@@ -247,8 +294,16 @@ def post_to_blogger(service, title, content, images, source):
 
 <hr>
 
+<div style="text-align: center; margin: 30px 0;">
+    <div style="display: flex; justify-content: center; gap: 12px; flex-wrap: wrap;">
+        <a href="https://twitter.com/intent/tweet?text={quote(clean_title[:70])}&url={quote(current_url)}" target="_blank" style="background:#1DA1F2; color:white; padding:10px 20px; border-radius:30px; text-decoration:none;">🐦 Share</a>
+        <a href="https://www.facebook.com/sharer/sharer.php?u={quote(current_url)}" target="_blank" style="background:#4267B2; color:white; padding:10px 20px; border-radius:30px; text-decoration:none;">📘 Share</a>
+        <a href="https://wa.me/?text={quote(clean_title[:50] + ' ' + current_url)}" target="_blank" style="background:#25D366; color:white; padding:10px 20px; border-radius:30px; text-decoration:none;">💬 Share</a>
+    </div>
+</div>
+
 <div style="text-align: center; font-size: 12px; color: #999;">
-    <p>© {datetime.now().year} News Analysis</p>
+    <p>© {datetime.now().year} News Analysis | In-Depth Coverage</p>
 </div>
 
 </body>
@@ -265,20 +320,18 @@ def post_to_blogger(service, title, content, images, source):
 def run():
     print("""
     ╔══════════════════════════════════════════════════════════════════════╗
-    ║      📰 GEMINI 2.5 FLASH NEWS BOT - 2000+ WORDS | FREE & FAST       ║
+    ║         📰 HUMANISED NEWS BOT - GEMINI 2.5 FLASH                    ║
     ║                                                                      ║
-    ║   ✓ Gemini 2.5 Flash (Google's fastest free model)                  ║
     ║   ✓ 2000-2500 words per article                                     ║
-    ║   ✓ 2 images from Pexels (free)                                     ║
-    ║   ✓ Humanised, natural language                                     ║
+    ║   ✓ NATURAL, human-sounding language                                ║
+    ║   ✓ 2 relevant images per post                                      ║
     ║   ✓ Text justified | No errors                                      ║
-    ║   ✓ Runs every 10 minutes                                           ║
+    ║   ✓ 100% FREE                                                       ║
     ╚══════════════════════════════════════════════════════════════════════╝
     """)
     
-    print("✅ Bot is RUNNING on GitHub Actions")
-    print("⏰ Runs every 10 minutes")
-    print("📝 Using Gemini 2.5 Flash (fastest free model)\n")
+    print("✅ Bot is RUNNING")
+    print("📝 Writing humanised articles\n")
     
     articles = fetch_news()
     if not articles:
@@ -290,28 +343,20 @@ def run():
     for article in articles:
         story_id = article['title'][:80]
         if story_id in processed:
-            print(f"   ⏭️ Already posted")
             continue
         
         print(f"\n📰 {article['title'][:70]}...")
-        print(f"   Source: {article['source']}")
-        
-        print(f"   🖼️ Fetching images...")
         images = get_images(article['title'])
-        print(f"   ✅ {len(images)} images ready")
-        
-        print(f"   ✍️ Writing 2000+ word article...")
-        content = write_article(article['title'], article.get('description', ''), article['source'])
+        content = write_human_article(article['title'], article.get('description', ''), article['source'])
         
         word_count = len(content.split())
-        print(f"   📝 Final: {word_count} words")
+        print(f"   📝 {word_count} words")
         
         service = google_login()
         if service:
             post_to_blogger(service, article['title'], content, images, article['source'])
             processed.add(story_id)
             save_processed(processed)
-            print(f"   ✅ Published!")
         
         break
 
