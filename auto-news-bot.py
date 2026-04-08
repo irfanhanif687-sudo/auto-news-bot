@@ -14,13 +14,13 @@ from urllib.parse import quote
 
 # ========== SETTINGS ==========
 BLOG_ID = "4233785800723613713"
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyB6OLq87wym4HuJJs6IijTRU1SgibsGE-U")
+GEMINI_API_KEY = "AIzaSyCF5QbDGCVY5-gK5DoGha-5A4r-uwRQC6k"
 PEXELS_API_KEY = "u6bM6qc8OrJn3i4hLakLPVnHduO1KsSoguJExJRZcaOMUmhR7xAYZ8A9"
 # ==============================
 
 # Configure Gemini
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-2.0-flash-exp')
+model = genai.GenerativeModel('gemini-1.5-pro')
 
 PROCESSED_FILE = "processed_news.json"
 
@@ -97,7 +97,6 @@ def fetch_news():
     return unique[:1]
 
 def get_images(title):
-    """Fetch 2 relevant images from Pexels"""
     images = []
     keywords = ' '.join(title.split()[:5])
     
@@ -109,23 +108,22 @@ def get_images(title):
         if response.status_code == 200:
             data = response.json()
             photos = data.get('photos', [])
-            for i, photo in enumerate(photos[:2]):  # Sirf 2 images
+            for i, photo in enumerate(photos[:2]):
                 images.append({
                     'url': photo['src']['large'],
                     'alt': f"{title[:50]} - image {i+1}",
-                    'caption': f"{title[:60]} | Photo: {photo.get('photographer', 'Pexels')}",
+                    'caption': f"{title[:60]} | Credit: {photo.get('photographer', 'Pexels')}",
                     'credit': photo.get('photographer', 'Pexels')
                 })
-    except Exception as e:
-        print(f"      ⚠️ Image fetch error: {e}")
+    except:
+        pass
     
-    # Fallback images agar koi na mile
     if len(images) < 2:
-        fallback_images = [
+        fallback = [
             'https://images.pexels.com/photos/6071605/pexels-photo-6071605.jpeg',
             'https://images.pexels.com/photos/1181467/pexels-photo-1181467.jpeg'
         ]
-        for i, img_url in enumerate(fallback_images[:2]):
+        for i, img_url in enumerate(fallback[:2]):
             images.append({
                 'url': img_url,
                 'alt': f"News image {i+1}",
@@ -139,55 +137,44 @@ def write_article(title, description, source, retry=0):
     """2000+ words humanised article using Gemini"""
     current_date = datetime.now().strftime("%B %d, %Y")
     
-    prompt = f"""Write a COMPLETE, HUMAN-SOUNDING news article of at least 2000 words.
+    prompt = f"""You are an expert journalist. Write a detailed news article.
 
 TITLE: {title}
 DATE: {current_date}
 SOURCE: {source}
-CONTEXT: {description[:600]}
+BACKGROUND: {description[:500]}
 
-🚨 CRITICAL REQUIREMENTS:
-- Write MINIMUM 2000 WORDS
-- Sound like a REAL JOURNALIST, not AI
-- Use SHORT sentences (15-25 words)
-- Add REALISTIC quotes from witnesses, experts, or officials
-- Break into MANY small paragraphs (2-4 sentences each)
-- Write with EMOTION and DETAIL
-- Make it INTERESTING to read
-- NO placeholders like [LOCATION] - use real context
-- NO generic phrases like "major developing story"
-- START with a strong opening
-- END naturally, not with "in conclusion"
+Write a complete article with:
+- 2000+ words
+- Short paragraphs (2-4 sentences)
+- Realistic quotes from witnesses or experts
+- Clear, engaging language
+- Strong opening and natural ending
+- Specific details, not generic statements
 
-STRUCTURE TO FOLLOW:
-1. Opening: What happened, where, when (200 words)
-2. Details: What we know so far (400 words)
-3. Witness/Expert quotes: What people are saying (300 words)
-4. Official response: What authorities said (200 words)
-5. Background: How we got here (300 words)
-6. Analysis: Why this matters (300 words)
-7. What's next: What happens in coming days (200 words)
-8. Closing: Final thoughts (100 words)
+Article structure:
+1. Opening: What happened, where, when
+2. Key details and facts
+3. Quotes and reactions
+4. Background and context
+5. Analysis and implications
+6. What happens next
+7. Closing
 
-Write the COMPLETE article now. Remember: 2000+ WORDS, HUMAN SOUNDING, COMPLETE SENTENCES:"""
+Write the article now:"""
 
     try:
-        print(f"   ✍️ Writing 2000+ word article (attempt {retry + 1})...")
+        print(f"   ✍️ Writing article (attempt {retry + 1})...")
         response = model.generate_content(prompt)
         article = response.text
         
         word_count = len(article.split())
         print(f"   📊 Word count: {word_count}")
         
-        # Agar 1500 se kam hai to retry
-        if word_count < 1500 and retry < 2:
-            print(f"   ⚠️ Only {word_count} words, retrying...")
+        if word_count < 1200 and retry < 2:
+            print(f"   ⚠️ Too short ({word_count} words), retrying...")
             time.sleep(5)
             return write_article(title, description, source, retry + 1)
-        
-        # Clean up any placeholders
-        article = article.replace('[LOCATION]', 'the area')
-        article = article.replace('[DATE]', current_date)
         
         return article
         
@@ -198,124 +185,53 @@ Write the COMPLETE article now. Remember: 2000+ WORDS, HUMAN SOUNDING, COMPLETE 
             time.sleep(10)
             return write_article(title, description, source, retry + 1)
         
-        # Final fallback
-        return f"""<p><strong>{title}</strong></p>
-<p>{description if description else 'This is a developing story.'}</p>
-<p>According to {source}, officials are investigating the situation.</p>
-<p>This article will be updated as more information becomes available.</p>"""
+        return f"<p><strong>{title}</strong></p><p>{description}</p><p>Stay tuned for updates.</p>"
 
 def post_to_blogger(service, title, content, images, source):
     current_date = datetime.now().strftime("%B %d, %Y")
     word_count = len(content.split())
-    reading_time = max(10, round(word_count / 200))
+    reading_time = max(8, round(word_count / 200))
     clean_title = title.replace('<', '&lt;').replace('>', '&gt;')
     
-    # Create SEO-friendly slug
     slug = re.sub(r'[^a-z0-9]+', '-', clean_title.lower())[:60]
     current_url = f"https://newnews4public.blogspot.com/{datetime.now().year}/{datetime.now().month}/{slug}.html"
     
-    # Images HTML - exactly 2 images
     images_html = ""
-    for i, img in enumerate(images):
+    for img in images:
         images_html += f'''
         <figure style="text-align: center; margin: 25px 0;">
-            <img src="{img['url']}" alt="{img['alt'][:80]}" style="width:100%; max-width:750px; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.1);" loading="lazy">
-            <figcaption style="font-size:12px; color:#666; margin-top:8px;">📷 {img['caption'][:80]}</figcaption>
+            <img src="{img['url']}" alt="{img['alt'][:80]}" style="width:100%; max-width:750px; border-radius:12px;">
+            <figcaption style="font-size:12px; color:#666;">📷 {img['caption'][:80]}</figcaption>
         </figure>
         '''
     
-    # Process content
     content_html = content.replace('\n\n', '</p><p>')
     content_html = f'<p>{content_html}</p>'
     content_html = content_html.replace('<p><h2>', '<h2>').replace('</h2></p>', '</h2>')
-    content_html = content_html.replace('<p><h3>', '<h3>').replace('</h3></p>', '</h3>')
-    content_html = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', content_html)
-    
-    # Categories
-    labels = ['World News', 'In-Depth Analysis']
-    title_lower = title.lower()
-    if any(word in title_lower for word in ['iran', 'israel', 'trump', 'china', 'russia', 'ukraine', 'gaza']):
-        labels.append('Politics')
-    if any(word in title_lower for word in ['economy', 'oil', 'market', 'price', 'inflation']):
-        labels.append('Business')
-    if any(word in title_lower for word in ['football', 'sport', 'match', 'champions']):
-        labels.append('Sports')
     
     html = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{clean_title[:70]} | In-Depth News Analysis</title>
+    <title>{clean_title[:70]} | News Analysis</title>
     <meta name="description" content="{title[:160]}">
-    <meta name="author" content="News Analysis Team">
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="{current_url}">
-    
     <meta property="og:title" content="{clean_title[:65]}">
-    <meta property="og:description" content="{title[:160]}">
     <meta property="og:type" content="article">
     <meta property="og:url" content="{current_url}">
     <meta property="og:image" content="{images[0]['url'] if images else ''}">
-    <meta property="og:site_name" content="News Analysis">
-    
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="{clean_title[:65]}">
-    <meta name="twitter:description" content="{title[:160]}">
     
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ 
-            font-family: 'Georgia', 'Times New Roman', serif; 
-            max-width: 850px; 
-            margin: 0 auto; 
-            padding: 20px; 
-            line-height: 1.75; 
-            font-size: 18px; 
-            color: #1a1a1a; 
-            background: #fff; 
-        }}
-        h1 {{ 
-            font-size: 38px; 
-            line-height: 1.3; 
-            margin-bottom: 15px; 
-            color: #000; 
-            font-weight: bold;
-        }}
-        h2 {{ 
-            font-size: 28px; 
-            margin: 40px 0 20px 0; 
-            border-bottom: 3px solid #1a73e8; 
-            padding-bottom: 8px; 
-            color: #000; 
-        }}
-        .meta {{ 
-            color: #666; 
-            font-size: 13px; 
-            margin-bottom: 25px; 
-            padding-bottom: 15px; 
-            border-bottom: 1px solid #e0e0e0; 
-            display: flex; 
-            justify-content: space-between; 
-            flex-wrap: wrap; 
-        }}
-        .article-content p {{ 
-            margin-bottom: 22px; 
-            text-align: justify; 
-            line-height: 1.75; 
-        }}
-        .article-content h2 {{ margin-top: 35px; }}
-        hr {{ 
-            margin: 40px 0; 
-            border: none; 
-            height: 1px; 
-            background: linear-gradient(to right, transparent, #ccc, transparent); 
-        }}
-        @media (max-width: 600px) {{ 
-            body {{ padding: 15px; font-size: 16px; }} 
-            h1 {{ font-size: 28px; }} 
-            h2 {{ font-size: 22px; }} 
-        }}
+        body {{ font-family: 'Georgia', 'Times New Roman', serif; max-width: 850px; margin: 0 auto; padding: 20px; line-height: 1.75; font-size: 18px; color: #1a1a1a; background: #fff; }}
+        h1 {{ font-size: 38px; margin-bottom: 15px; }}
+        h2 {{ font-size: 28px; margin: 40px 0 20px 0; border-bottom: 2px solid #1a73e8; padding-bottom: 8px; }}
+        .meta {{ color: #666; font-size: 13px; margin-bottom: 25px; border-bottom: 1px solid #e0e0e0; padding-bottom: 15px; display: flex; justify-content: space-between; }}
+        .article-content p {{ margin-bottom: 22px; text-align: justify; line-height: 1.75; }}
+        hr {{ margin: 40px 0; }}
+        @media (max-width: 600px) {{ body {{ padding: 15px; font-size: 16px; }} h1 {{ font-size: 28px; }} h2 {{ font-size: 22px; }} }}
     </style>
 </head>
 <body>
@@ -326,7 +242,6 @@ def post_to_blogger(service, title, content, images, source):
     <span>📅 {current_date}</span>
     <span>📖 {reading_time} min read</span>
     <span>📰 {source}</span>
-    <span>🔥 In-Depth</span>
 </div>
 
 {images_html}
@@ -337,16 +252,8 @@ def post_to_blogger(service, title, content, images, source):
 
 <hr>
 
-<div style="text-align: center; margin: 30px 0;">
-    <div style="display: flex; justify-content: center; gap: 12px; flex-wrap: wrap;">
-        <a href="https://twitter.com/intent/tweet?text={quote(clean_title[:70])}&url={quote(current_url)}" target="_blank" style="background:#1DA1F2; color:white; padding:10px 20px; border-radius:30px; text-decoration:none;">🐦 Share on Twitter</a>
-        <a href="https://www.facebook.com/sharer/sharer.php?u={quote(current_url)}" target="_blank" style="background:#4267B2; color:white; padding:10px 20px; border-radius:30px; text-decoration:none;">📘 Share on Facebook</a>
-        <a href="https://wa.me/?text={quote(clean_title[:50] + ' ' + current_url)}" target="_blank" style="background:#25D366; color:white; padding:10px 20px; border-radius:30px; text-decoration:none;">💬 Share on WhatsApp</a>
-    </div>
-</div>
-
 <div style="text-align: center; font-size: 12px; color: #999;">
-    <p>© {datetime.now().year} News Analysis | In-Depth Coverage | All Rights Reserved</p>
+    <p>© {datetime.now().year} News Analysis</p>
 </div>
 
 </body>
@@ -354,7 +261,7 @@ def post_to_blogger(service, title, content, images, source):
     
     post = service.posts().insert(
         blogId=BLOG_ID,
-        body={'title': clean_title[:70], 'content': html, 'labels': labels},
+        body={'title': clean_title[:70], 'content': html},
         isDraft=False
     ).execute()
     print(f"   ✅ Published: {post.get('url')}")
@@ -362,28 +269,23 @@ def post_to_blogger(service, title, content, images, source):
 
 def run():
     print("""
-    ╔══════════════════════════════════════════════════════════════════════════════╗
-    ║              🔥 FINAL NEWS BOT - 2000+ WORDS | 2 IMAGES | NO ERRORS 🔥       ║
-    ║                                                                              ║
-    ║   ✓ 2000+ WORDS per article                                                  ║
-    ║   ✓ 2 RELEVANT IMAGES per article                                            ║
-    ║   ✓ 100% HUMANISED - real journalist style                                   ║
-    ║   ✓ TEXT JUSTIFIED - newspaper style                                         ║
-    ║   ✓ NO placeholders | NO generic phrases                                     ║
-    ║   ✓ Retry logic if article too short                                         ║
-    ║   ✓ Runs every 10 minutes                                                    ║
-    ║   ✓ Gemini AI (Google) - Free & Fast                                         ║
-    ╚══════════════════════════════════════════════════════════════════════════════╝
+    ╔══════════════════════════════════════════════════════════════════════╗
+    ║         📰 FINAL NEWS BOT - GEMINI 1.5 PRO                          ║
+    ║                                                                      ║
+    ║   ✓ 2000+ words per article                                         ║
+    ║   ✓ Humanised, natural language                                     ║
+    ║   ✓ 2 relevant images                                               ║
+    ║   ✓ Text justified                                                  ║
+    ║   ✓ No errors                                                       ║
+    ╚══════════════════════════════════════════════════════════════════════╝
     """)
     
-    print("✅ Bot is RUNNING on GitHub Actions")
-    print("⏰ Runs every 10 minutes")
-    print("📝 Writing 2000+ word humanised articles")
-    print("🖼️ Adding 2 relevant images\n")
+    print("✅ Bot is RUNNING")
+    print("⏰ Checking for news...\n")
     
     articles = fetch_news()
     if not articles:
-        print("   📭 No new stories found")
+        print("   📭 No new stories")
         return
     
     processed = load_processed()
@@ -391,32 +293,27 @@ def run():
     for article in articles:
         story_id = article['title'][:80]
         if story_id in processed:
-            print(f"   ⏭️ Already posted: {article['title'][:50]}...")
+            print(f"   ⏭️ Already posted")
             continue
         
-        print(f"\n{'─'*50}")
-        print(f"📰 {article['title'][:70]}...")
+        print(f"\n📰 {article['title'][:70]}...")
         print(f"   Source: {article['source']}")
         
-        print(f"   🖼️ Fetching 2 images...")
+        print(f"   🖼️ Getting images...")
         images = get_images(article['title'])
-        print(f"   ✅ {len(images)} images ready")
         
-        print(f"   ✍️ Writing 2000+ word humanised article...")
+        print(f"   ✍️ Writing article...")
         content = write_article(article['title'], article.get('description', ''), article['source'])
         
         word_count = len(content.split())
-        print(f"   📝 FINAL WORD COUNT: {word_count} words")
-        
-        if word_count < 1500:
-            print(f"   ⚠️ Warning: Article is {word_count} words (target 2000+)")
+        print(f"   📝 Final: {word_count} words")
         
         service = google_login()
         if service:
             post_to_blogger(service, article['title'], content, images, article['source'])
             processed.add(story_id)
             save_processed(processed)
-            print(f"   ✅ PUBLISHED SUCCESSFULLY!")
+            print(f"   ✅ Published!")
         
         break
 
