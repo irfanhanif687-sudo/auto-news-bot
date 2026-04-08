@@ -62,14 +62,21 @@ def fetch_news():
             feed = feedparser.parse(feed_url)
             source_name = feed.feed.get('title', 'Unknown')[:30]
             
-            for entry in feed.entries[:3]:
+            for entry in feed.entries[:5]:
                 title = entry.get('title', '').strip()
                 link = entry.get('link', '')
                 description = entry.get('summary', '')[:500]
                 description = re.sub(r'<[^>]+>', '', description)
                 
+                # Skip unwanted topics (live updates, videos, etc.)
+                skip_words = ['live', 'update', 'watch', 'video', 'podcast', 'BTS', 'K-pop', 'Moo Deng']
+                if any(word in title.lower() for word in skip_words):
+                    print(f"      ⏭️ Skipping: {title[:40]}...")
+                    continue
+                
                 if title and link and len(title) > 25:
-                    story_id = title[:80]
+                    # Use link as story_id for better uniqueness
+                    story_id = link[:80]
                     if story_id not in processed:
                         articles.append({
                             'title': title,
@@ -80,6 +87,7 @@ def fetch_news():
         except Exception as e:
             print(f"      ⚠️ Error: {e}")
     
+    # Remove duplicates by title
     seen = set()
     unique = []
     for a in articles:
@@ -88,7 +96,7 @@ def fetch_news():
             unique.append(a)
     
     print(f"   ✅ Found {len(unique)} new stories")
-    return unique[:1]
+    return unique[:2]  # 2 posts per run
 
 def get_images(title):
     images = []
@@ -125,7 +133,7 @@ def get_images(title):
 def write_article(title, description, source, retry=0):
     current_date = datetime.now().strftime("%B %d, %Y")
     
-    prompt = f"""Write a detailed, human-sounding news article.
+    prompt = f"""Write a complete, human-sounding news article.
 
 TITLE: {title}
 DATE: {current_date}
@@ -133,9 +141,9 @@ SOURCE: {source}
 CONTEXT: {description[:500]}
 
 REQUIREMENTS:
-- Write 2000+ words
+- Write 1500-2000 words
 - Sound like a real journalist
-- Add realistic quotes from witnesses/experts
+- Add realistic quotes from witnesses or experts
 - Use short paragraphs (2-4 sentences)
 - NO placeholders
 - Strong opening, natural ending
@@ -143,7 +151,7 @@ REQUIREMENTS:
 Write the complete article now:"""
 
     try:
-        print(f"   ✍️ Writing article via OpenRouter (Llama 4)...")
+        print(f"   ✍️ Writing article via OpenRouter...")
         
         response = requests.post(
             url="https://openrouter.ai/api/v1/chat/completions",
@@ -152,7 +160,7 @@ Write the complete article now:"""
                 "Content-Type": "application/json",
             },
             json={
-                "model": "meta-llama/llama-4-maverick:free",  # Better for long articles
+                "model": "meta-llama/llama-4-maverick:free",
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.7,
                 "max_tokens": 8000,
@@ -210,65 +218,96 @@ def post_to_blogger(service, title, content, images, source):
     <meta name="description" content="{title[:160]}">
     <link rel="canonical" href="{current_url}">
     <style>
-        body {{ font-family: Georgia; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.7; font-size: 18px; }}
-        h1 {{ font-size: 36px; }}
+        body {{ font-family: 'Georgia', 'Times New Roman', serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.7; font-size: 18px; color: #1a1a1a; }}
+        h1 {{ font-size: 36px; margin-bottom: 15px; }}
         h2 {{ font-size: 28px; margin: 35px 0 15px 0; border-bottom: 2px solid #1a73e8; padding-bottom: 8px; }}
-        p {{ text-align: justify; margin-bottom: 20px; }}
-        @media (max-width: 600px) {{ body {{ padding: 15px; font-size: 16px; }} h1 {{ font-size: 28px; }} }}
+        .meta {{ color: #666; font-size: 13px; margin-bottom: 25px; border-bottom: 1px solid #e0e0e0; padding-bottom: 15px; }}
+        p {{ text-align: justify; margin-bottom: 22px; line-height: 1.7; }}
+        hr {{ margin: 40px 0; border: none; height: 1px; background: #e0e0e0; }}
+        @media (max-width: 600px) {{ body {{ padding: 15px; font-size: 16px; }} h1 {{ font-size: 28px; }} h2 {{ font-size: 22px; }} }}
     </style>
 </head>
 <body>
     <h1>{clean_title}</h1>
-    <p>📅 {current_date} | 📖 {reading_time} min read | 📰 {source}</p>
+    <div class="meta">
+        <span>📅 {current_date}</span>
+        <span>📖 {reading_time} min read</span>
+        <span>📰 {source}</span>
+    </div>
     {images_html}
-    <div>{content_html}</div>
+    <div class="content">
+        {content_html}
+    </div>
     <hr>
-    <p>© {datetime.now().year} News Analysis</p>
+    <p style="text-align: center; font-size: 12px; color: #999;">© {datetime.now().year} News Analysis | In-Depth Coverage</p>
 </body>
 </html>'''
     
-    post = service.posts().insert(blogId=BLOG_ID, body={'title': clean_title[:70], 'content': html}, isDraft=False).execute()
+    post = service.posts().insert(
+        blogId=BLOG_ID,
+        body={'title': clean_title[:70], 'content': html},
+        isDraft=False
+    ).execute()
     print(f"   ✅ Published: {post.get('url')}")
     return post
 
 def run():
     print("""
     ╔══════════════════════════════════════════════════════════════════════╗
-    ║      📰 LLAMA 4 NEWS BOT - 2000+ WORDS | FREE | WORKING             ║
+    ║      📰 OPENROUTER NEWS BOT - 1500+ WORDS | FREE | WORKING          ║
     ║                                                                      ║
     ║   ✓ Llama 4 Maverick (Meta's best free model)                       ║
-    ║   ✓ 2000+ words humanised articles                                  ║
+    ║   ✓ 1500-2000 words humanised articles                              ║
     ║   ✓ 2 images from Pexels                                            ║
     ║   ✓ Text justified | No errors                                      ║
     ║   ✓ NO credit card required                                         ║
+    ║   ✓ 2 posts per run (if available)                                  ║
     ╚══════════════════════════════════════════════════════════════════════╝
     """)
     
     print("✅ Bot is RUNNING")
-    print("📝 Writing 2000+ word articles via Llama 4\n")
+    print("📝 Writing articles via Llama 4\n")
     
     articles = fetch_news()
     if not articles:
-        print("No news")
+        print("📭 No new stories found")
         return
     
     processed = load_processed()
+    published = 0
     
-    for a in articles:
-        pid = a['title'][:80]
-        if pid in processed:
+    for article in articles:
+        story_id = article['url'][:80]  # Use URL as ID
+        if story_id in processed:
+            print(f"   ⏭️ Already posted: {article['title'][:50]}...")
             continue
         
-        print(f"\n📰 {a['title'][:60]}...")
-        images = get_images(a['title'])
-        content = write_article(a['title'], a.get('description', ''), a['source'])
+        print(f"\n📰 {article['title'][:70]}...")
+        print(f"   Source: {article['source']}")
+        
+        print(f"   🖼️ Getting images...")
+        images = get_images(article['title'])
+        print(f"   ✅ {len(images)} images ready")
+        
+        print(f"   ✍️ Writing article...")
+        content = write_article(article['title'], article.get('description', ''), article['source'])
+        
+        word_count = len(content.split())
+        print(f"   📝 Final word count: {word_count} words")
         
         service = google_login()
         if service:
-            post_to_blogger(service, a['title'], content, images, a['source'])
-            processed.add(pid)
+            post_to_blogger(service, article['title'], content, images, article['source'])
+            processed.add(story_id)
             save_processed(processed)
-        break
+            published += 1
+            print(f"   ✅ Published ({published}/{len(articles)})")
+        else:
+            print(f"   ❌ Failed to login to Blogger")
+        
+        time.sleep(10)  # Delay between posts
+    
+    print(f"\n📊 Published {published} new articles this run")
 
 if __name__ == "__main__":
     run()
