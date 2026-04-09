@@ -13,7 +13,6 @@ from urllib.parse import quote
 
 # ========== SETTINGS ==========
 BLOG_ID = "4233785800723613713"
-OPENROUTER_API_KEY = "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"
 PEXELS_API_KEY = "u6bM6qc8OrJn3i4hLakLPVnHduO1KsSoguJExJRZcaOMUmhR7xAYZ8A9"
 # ==============================
 
@@ -62,11 +61,16 @@ def fetch_news():
             feed = feedparser.parse(feed_url)
             source_name = feed.feed.get('title', 'Unknown')[:30]
             
-            for entry in feed.entries[:3]:
+            for entry in feed.entries[:5]:
                 title = entry.get('title', '').strip()
                 link = entry.get('link', '')
-                description = entry.get('summary', '')[:500]
+                description = entry.get('summary', '')[:600]
                 description = re.sub(r'<[^>]+>', '', description)
+                
+                # Skip live/video updates
+                skip_words = ['live', 'update', 'watch', 'video', 'podcast', 'breaking']
+                if any(word in title.lower() for word in skip_words):
+                    continue
                 
                 if title and link and len(title) > 25:
                     story_id = title[:80]
@@ -122,74 +126,9 @@ def get_images(title):
     
     return images[:2]
 
-def write_article(title, description, source, retry=0):
+def post_to_blogger(service, title, description, images, source):
+    """Direct post from RSS - NO AI NEEDED"""
     current_date = datetime.now().strftime("%B %d, %Y")
-    
-    prompt = f"""Write a complete, human-sounding news article.
-
-TITLE: {title}
-DATE: {current_date}
-SOURCE: {source}
-CONTEXT: {description[:500]}
-
-REQUIREMENTS:
-- Write 1500-2000 words
-- Sound like a real journalist
-- Add realistic quotes from witnesses or experts
-- Use short paragraphs (2-4 sentences)
-- NO placeholders
-- Strong opening, natural ending
-
-Write the complete article now:"""
-
-    try:
-        print(f"   ✍️ Writing article via OpenRouter (Gemini 2.0 Flash)...")
-        
-        response = requests.post(
-            url="https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "google/gemini-2.0-flash-exp:free",  # Changed model
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.7,
-                "max_tokens": 8000,
-            },
-            timeout=240
-        )
-        
-        if response.status_code == 200:
-            article = response.json()['choices'][0]['message']['content']
-            word_count = len(article.split())
-            print(f"   📊 {word_count} words")
-            
-            if word_count < 500 and retry < 2:
-                print(f"   ⚠️ Too short, retrying...")
-                time.sleep(5)
-                return write_article(title, description, source, retry + 1)
-            
-            return article
-        else:
-            print(f"   ❌ API Error: {response.status_code}")
-            print(f"   Response: {response.text[:200]}")
-            if retry < 2:
-                time.sleep(5)
-                return write_article(title, description, source, retry + 1)
-            
-    except Exception as e:
-        print(f"   ❌ Error: {e}")
-        if retry < 2:
-            time.sleep(5)
-            return write_article(title, description, source, retry + 1)
-    
-    return f"<p><strong>{title}</strong></p><p>{description}</p>"
-
-def post_to_blogger(service, title, content, images, source):
-    current_date = datetime.now().strftime("%B %d, %Y")
-    word_count = len(content.split())
-    reading_time = max(8, round(word_count / 200))
     clean_title = title.replace('<', '&lt;').replace('>', '&gt;')
     
     slug = re.sub(r'[^a-z0-9]+', '-', clean_title.lower())[:60]
@@ -197,34 +136,36 @@ def post_to_blogger(service, title, content, images, source):
     
     images_html = ""
     for img in images:
-        images_html += f'<img src="{img["url"]}" style="width:100%; margin:15px 0; border-radius:10px;">'
+        images_html += f'<img src="{img["url"]}" style="width:100%; max-width:700px; margin:15px 0; border-radius:10px;">'
     
-    content_html = content.replace('\n\n', '</p><p>')
-    content_html = f'<p>{content_html}</p>'
-    content_html = content_html.replace('<p><h2>', '<h2>').replace('</h2></p>', '</h2>')
+    # Create nice HTML from RSS description
+    content_html = f"""
+    <p><strong>Source:</strong> {source}</p>
+    <p>{description}</p>
+    <p><em>For more details, visit the original source.</em></p>
+    """
     
     html = f'''<!DOCTYPE html>
 <html>
 <head>
     <title>{clean_title[:70]} | News Analysis</title>
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="{title[:160]}">
+    <meta name="description" content="{description[:160]}">
     <link rel="canonical" href="{current_url}">
     <style>
         body {{ font-family: 'Georgia', 'Times New Roman', serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.7; font-size: 18px; color: #1a1a1a; }}
-        h1 {{ font-size: 36px; margin-bottom: 15px; }}
-        h2 {{ font-size: 28px; margin: 35px 0 15px 0; border-bottom: 2px solid #1a73e8; padding-bottom: 8px; }}
+        h1 {{ font-size: 36px; margin-bottom: 15px; color: #000; }}
         .meta {{ color: #666; font-size: 13px; margin-bottom: 25px; border-bottom: 1px solid #e0e0e0; padding-bottom: 15px; }}
         p {{ text-align: justify; margin-bottom: 22px; line-height: 1.7; }}
         hr {{ margin: 40px 0; border: none; height: 1px; background: #e0e0e0; }}
-        @media (max-width: 600px) {{ body {{ padding: 15px; font-size: 16px; }} h1 {{ font-size: 28px; }} h2 {{ font-size: 22px; }} }}
+        @media (max-width: 600px) {{ body {{ padding: 15px; font-size: 16px; }} h1 {{ font-size: 28px; }} }}
     </style>
 </head>
 <body>
     <h1>{clean_title}</h1>
     <div class="meta">
         <span>📅 {current_date}</span>
-        <span>📖 {reading_time} min read</span>
         <span>📰 {source}</span>
     </div>
     {images_html}
@@ -232,7 +173,7 @@ def post_to_blogger(service, title, content, images, source):
         {content_html}
     </div>
     <hr>
-    <p style="text-align: center; font-size: 12px; color: #999;">© {datetime.now().year} News Analysis | In-Depth Coverage</p>
+    <p style="text-align: center; font-size: 12px; color: #999;">© {datetime.now().year} News Analysis | RSS News Aggregator</p>
 </body>
 </html>'''
     
@@ -247,40 +188,49 @@ def post_to_blogger(service, title, content, images, source):
 def run():
     print("""
     ╔══════════════════════════════════════════════════════════════════════╗
-    ║      📰 OPENROUTER NEWS BOT - GEMINI 2.0 FLASH                      ║
+    ║         📰 RSS NEWS BOT - NO AI | 100% WORKING                      ║
     ║                                                                      ║
-    ║   ✓ Gemini 2.0 Flash (fast & reliable)                              ║
-    ║   ✓ 1500-2000 words humanised articles                              ║
+    ║   ✓ NO API key required                                             ║
+    ║   ✓ Direct RSS to blog                                              ║
     ║   ✓ 2 images from Pexels                                            ║
-    ║   ✓ Text justified | No errors                                      ║
-    ║   ✓ NO credit card required                                         ║
+    ║   ✓ Text justified                                                  ║
+    ║   ✓ 100% FREE | NO CREDIT CARD                                      ║
+    ║   ✓ Runs every 30 minutes                                           ║
     ╚══════════════════════════════════════════════════════════════════════╝
     """)
     
-    print("✅ Bot is RUNNING")
-    print("📝 Writing articles via Gemini 2.0 Flash\n")
+    print("✅ Bot is RUNNING (NO AI MODE)")
+    print("📝 Posting directly from RSS feeds\n")
     
     articles = fetch_news()
     if not articles:
-        print("📭 No new stories")
+        print("📭 No new stories found")
         return
     
     processed = load_processed()
     
-    for a in articles:
-        pid = a['title'][:80]
-        if pid in processed:
+    for article in articles:
+        story_id = article['title'][:80]
+        if story_id in processed:
+            print(f"   ⏭️ Already posted: {article['title'][:50]}...")
             continue
         
-        print(f"\n📰 {a['title'][:60]}...")
-        images = get_images(a['title'])
-        content = write_article(a['title'], a.get('description', ''), a['source'])
+        print(f"\n📰 {article['title'][:70]}...")
+        print(f"   Source: {article['source']}")
+        
+        print(f"   🖼️ Getting images...")
+        images = get_images(article['title'])
+        print(f"   ✅ {len(images)} images ready")
         
         service = google_login()
         if service:
-            post_to_blogger(service, a['title'], content, images, a['source'])
-            processed.add(pid)
+            post_to_blogger(service, article['title'], article['description'], images, article['source'])
+            processed.add(story_id)
             save_processed(processed)
+            print(f"   ✅ Published successfully!")
+        else:
+            print(f"   ❌ Failed to login to Blogger")
+        
         break
 
 if __name__ == "__main__":
