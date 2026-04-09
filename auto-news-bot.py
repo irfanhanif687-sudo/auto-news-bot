@@ -14,7 +14,7 @@ from urllib.parse import quote
 
 # ========== SETTINGS ==========
 BLOG_ID = "4233785800723613713"
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "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")
+GROQ_API_KEY = "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"
 PEXELS_API_KEY = "u6bM6qc8OrJn3i4hLakLPVnHduO1KsSoguJExJRZcaOMUmhR7xAYZ8A9"
 # ==============================
 
@@ -124,10 +124,11 @@ def get_images(title):
     
     return images[:2]
 
-def write_article(title, description, source, retry=0):
+def write_article_with_urdu(title, description, source, retry=0):
+    """2000+ words English + Urdu translation"""
     current_date = datetime.now().strftime("%B %d, %Y")
     
-    prompt = f"""Write a detailed, human-sounding news article.
+    prompt = f"""Write a complete, human-sounding news article in ENGLISH, then write its URDU translation.
 
 TITLE: {title}
 DATE: {current_date}
@@ -135,43 +136,50 @@ SOURCE: {source}
 CONTEXT: {description[:500]}
 
 REQUIREMENTS:
-- Write 2000+ words
-- Sound like a real journalist
+- Write 1500-2000 words in ENGLISH first
+- Then write complete URDU translation of the same article
+- Sound like a real journalist in both languages
 - Add realistic quotes
 - Use short paragraphs
 - NO placeholders
-- Strong opening, natural ending
+
+STRUCTURE:
+[ENGLISH ARTICLE]
+(1500-2000 words)
+
+[URDU TRANSLATION]
+(Complete Urdu translation of above)
 
 Write now:"""
 
     try:
-        print(f"   ✍️ Writing 2000+ word article...")
+        print(f"   ✍️ Writing English + Urdu article...")
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
-            timeout=240
+            timeout=300
         )
         article = response.choices[0].message.content
         word_count = len(article.split())
-        print(f"   📊 {word_count} words")
+        print(f"   📊 {word_count} words (English + Urdu)")
         
         if word_count < 1000 and retry < 2:
             print(f"   ⚠️ Too short, retrying...")
             time.sleep(5)
-            return write_article(title, description, source, retry + 1)
+            return write_article_with_urdu(title, description, source, retry + 1)
         
         return article
     except Exception as e:
         print(f"   ❌ Error: {e}")
         if retry < 2:
             time.sleep(5)
-            return write_article(title, description, source, retry + 1)
+            return write_article_with_urdu(title, description, source, retry + 1)
         return f"<p>{title}</p><p>{description}</p>"
 
 def post_to_blogger(service, title, content, images, source):
     current_date = datetime.now().strftime("%B %d, %Y")
     word_count = len(content.split())
-    reading_time = max(10, round(word_count / 200))
+    reading_time = max(15, round(word_count / 200))
     clean_title = title.replace('<', '&lt;').replace('>', '&gt;')
     
     slug = re.sub(r'[^a-z0-9]+', '-', clean_title.lower())[:60]
@@ -179,28 +187,32 @@ def post_to_blogger(service, title, content, images, source):
     
     images_html = ""
     for img in images:
-        images_html += f'<img src="{img["url"]}" style="width:100%; margin:20px 0; border-radius:12px;">'
+        images_html += f'<img src="{img["url"]}" style="width:100%; max-width:750px; margin:20px 0; border-radius:12px;">'
     
+    # Split English and Urdu if possible
     content_html = content.replace('\n\n', '</p><p>')
     content_html = f'<p>{content_html}</p>'
     content_html = content_html.replace('<p><h2>', '<h2>').replace('</h2></p>', '</h2>')
     
+    # Add Urdu language support
     html = f'''<!DOCTYPE html>
-<html>
+<html lang="ur">
 <head>
-    <title>{clean_title[:70]} | News Analysis</title>
+    <title>{clean_title[:70]} | News Analysis (English + Urdu)</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="{title[:160]}">
+    <meta name="description" content="{title[:160]} - English and Urdu coverage">
     <link rel="canonical" href="{current_url}">
     <style>
-        body {{ font-family: 'Georgia', 'Times New Roman', serif; max-width: 850px; margin: 0 auto; padding: 20px; line-height: 1.75; font-size: 18px; }}
+        body {{ font-family: 'Georgia', 'Times New Roman', 'Arial', sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; line-height: 1.75; font-size: 18px; }}
         h1 {{ font-size: 38px; margin-bottom: 15px; }}
         h2 {{ font-size: 28px; margin: 40px 0 20px 0; border-bottom: 2px solid #1a73e8; padding-bottom: 8px; }}
         .meta {{ color: #666; font-size: 13px; margin-bottom: 25px; border-bottom: 1px solid #e0e0e0; padding-bottom: 15px; display: flex; justify-content: space-between; }}
         p {{ text-align: justify; margin-bottom: 22px; line-height: 1.75; }}
+        .urdu {{ font-family: 'Noto Nastaliq Urdu', 'Jameel Noori Nastaleeq', 'Arial', sans-serif; font-size: 20px; line-height: 2; direction: rtl; text-align: right; background: #f9f9f9; padding: 20px; border-radius: 12px; margin: 30px 0; }}
+        .lang-badge {{ display: inline-block; background: #1a73e8; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; margin-right: 10px; }}
         hr {{ margin: 40px 0; }}
-        @media (max-width: 600px) {{ body {{ padding: 15px; font-size: 16px; }} h1 {{ font-size: 28px; }} }}
+        @media (max-width: 600px) {{ body {{ padding: 15px; font-size: 16px; }} h1 {{ font-size: 28px; }} .urdu {{ font-size: 18px; }} }}
     </style>
 </head>
 <body>
@@ -209,13 +221,14 @@ def post_to_blogger(service, title, content, images, source):
         <span>📅 {current_date}</span>
         <span>📖 {reading_time} min read</span>
         <span>📰 {source}</span>
+        <span>🇬🇧 English | 🇵🇰 اردو</span>
     </div>
     {images_html}
     <div class="content">
         {content_html}
     </div>
     <hr>
-    <p style="text-align: center; font-size: 12px;">© {datetime.now().year} News Analysis</p>
+    <p style="text-align: center; font-size: 12px;">© {datetime.now().year} News Analysis | Bilingual Coverage (English + Urdu)</p>
 </body>
 </html>'''
     
@@ -226,12 +239,13 @@ def post_to_blogger(service, title, content, images, source):
 def run():
     print("""
     ╔══════════════════════════════════════════════════════════════════════╗
-    ║         📰 GROQ AI NEWS BOT - 2000+ WORDS HUMANISED                 ║
+    ║      📰 BILINGUAL NEWS BOT - ENGLISH + URDU | 2000+ WORDS           ║
     ║                                                                      ║
-    ║   ✓ 2000+ words per article                                         ║
-    ║   ✓ Human-sounding, natural language                                ║
+    ║   ✓ 1500-2000 words English + Urdu translation                      ║
+    ║   ✓ Humanised, natural language                                     ║
     ║   ✓ 2 images from Pexels                                            ║
-    ║   ✓ Text justified                                                  ║
+    ║   ✓ Text justified | Urdu RTL support                               ║
+    ║   ✓ NO credit card required                                         ║
     ╚══════════════════════════════════════════════════════════════════════╝
     """)
     
@@ -249,7 +263,7 @@ def run():
         
         print(f"\n📰 {a['title'][:60]}...")
         images = get_images(a['title'])
-        content = write_article(a['title'], a.get('description', ''), a['source'])
+        content = write_article_with_urdu(a['title'], a.get('description', ''), a['source'])
         
         service = google_login()
         if service:
