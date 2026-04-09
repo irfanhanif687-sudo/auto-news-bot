@@ -1,38 +1,252 @@
-name: Auto News Blogger
+import requests
+import feedparser
+import time
+import os
+import json
+import re
+from datetime import datetime
+from groq import Groq
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from urllib.parse import quote
 
-on:
-  schedule:
-    - cron: '*/30 * * * *'
-  workflow_dispatch:
+# ========== SETTINGS ==========
+BLOG_ID = "4233785800723613713"
+GROQ_API_KEY = "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"
+PEXELS_API_KEY = "u6bM6qc8OrJn3i4hLakLPVnHduO1KsSoguJExJRZcaOMUmhR7xAYZ8A9"
+# ==============================
 
-jobs:
-  run-bot:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+client = Groq(api_key=GROQ_API_KEY)
+PROCESSED_FILE = "processed_news.json"
+
+def load_processed():
+    if os.path.exists(PROCESSED_FILE):
+        with open(PROCESSED_FILE, 'r') as f:
+            return set(json.load(f))
+    return set()
+
+def save_processed(data):
+    with open(PROCESSED_FILE, 'w') as f:
+        json.dump(list(data), f)
+
+def google_login():
+    SCOPES = ['https://www.googleapis.com/auth/blogger']
+    creds = None
+    if os.path.exists('token.json'):
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            if not os.path.exists('credentials.json'):
+                print("❌ credentials.json missing!")
+                return None
+            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+            creds = flow.run_local_server(port=0)
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+    return build('blogger', 'v3', credentials=creds)
+
+RSS_FEEDS = [
+    'http://feeds.bbci.co.uk/news/world/rss.xml',
+    'https://www.aljazeera.com/xml/rss/all.xml',
+]
+
+def fetch_news():
+    articles = []
+    processed = load_processed()
+    print(f"   📡 Checking feeds...")
     
-    steps:
-    - uses: actions/checkout@v4
+    for feed_url in RSS_FEEDS:
+        try:
+            feed = feedparser.parse(feed_url)
+            source_name = feed.feed.get('title', 'Unknown')[:30]
+            
+            for entry in feed.entries[:3]:
+                title = entry.get('title', '').strip()
+                link = entry.get('link', '')
+                description = entry.get('summary', '')[:500]
+                description = re.sub(r'<[^>]+>', '', description)
+                
+                skip_words = ['live', 'update', 'watch', 'video', 'podcast']
+                if any(word in title.lower() for word in skip_words):
+                    continue
+                
+                if title and link and len(title) > 25:
+                    story_id = title[:80]
+                    if story_id not in processed:
+                        articles.append({
+                            'title': title,
+                            'url': link,
+                            'description': description,
+                            'source': source_name,
+                        })
+        except Exception as e:
+            print(f"      ⚠️ Error: {e}")
     
-    - name: Setup Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+    seen = set()
+    unique = []
+    for a in articles:
+        if a['title'] not in seen:
+            seen.add(a['title'])
+            unique.append(a)
     
-    - name: Install dependencies
-      run: |
-        pip install --no-cache-dir requests feedparser groq google-auth google-auth-oauthlib google-api-python-client
+    print(f"   ✅ Found {len(unique)} new stories")
+    return unique[:1]
+
+def get_images(title):
+    images = []
+    keywords = ' '.join(title.split()[:5])
     
-    - name: Run News Bot
-      env:
-        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      run: python auto-news-bot.py
+    try:
+        url = f"https://api.pexels.com/v1/search?query={quote(keywords)}&per_page=4&orientation=landscape"
+        headers = {"Authorization": PEXELS_API_KEY}
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            photos = data.get('photos', [])
+            for i, photo in enumerate(photos[:2]):
+                images.append({
+                    'url': photo['src']['large'],
+                    'alt': f"{title[:50]} - image {i+1}",
+                    'caption': f"{title[:60]} | Credit: {photo.get('photographer', 'Pexels')}",
+                    'credit': photo.get('photographer', 'Pexels')
+                })
+    except:
+        pass
     
-    - name: Commit processed news
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add processed_news.json
-        git diff --quiet && git diff --staged --quiet || git commit -m "Update processed news"
-        git push
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    if len(images) < 2:
+        fallback = [
+            'https://images.pexels.com/photos/6071605/pexels-photo-6071605.jpeg',
+            'https://images.pexels.com/photos/1181467/pexels-photo-1181467.jpeg'
+        ]
+        for i, img_url in enumerate(fallback[:2]):
+            images.append({'url': img_url, 'alt': f"News image {i+1}", 'caption': title[:50], 'credit': 'Pexels'})
+    
+    return images[:2]
+
+def write_bilingual_article(title, description, source, retry=0):
+    current_date = datetime.now().strftime("%B %d, %Y")
+    
+    prompt = f"""Write a COMPLETE bilingual news article.
+
+TITLE: {title}
+DATE: {current_date}
+SOURCE: {source}
+CONTEXT: {description[:500]}
+
+INSTRUCTIONS:
+1. FIRST write a COMPLETE English article of 1500-2000 words
+2. THEN write a COMPLETE Urdu translation
+3. Urdu translation must be 100% complete
+
+FORMAT:
+[ENGLISH ARTICLE]
+(complete English article)
+
+[URDU TRANSLATION]
+(complete Urdu translation)
+
+Write now:"""
+
+    try:
+        print(f"   ✍️ Writing bilingual article...")
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            timeout=300
+        )
+        article = response.choices[0].message.content
+        word_count = len(article.split())
+        print(f"   📊 {word_count} words")
+        return article
+    except Exception as e:
+        print(f"   ❌ Error: {e}")
+        if retry < 2:
+            time.sleep(5)
+            return write_bilingual_article(title, description, source, retry + 1)
+        return f"<p>{title}</p><p>{description}</p>"
+
+def post_to_blogger(service, title, content, images, source):
+    current_date = datetime.now().strftime("%B %d, %Y")
+    word_count = len(content.split())
+    reading_time = max(12, round(word_count / 200))
+    clean_title = title.replace('<', '&lt;').replace('>', '&gt;')
+    
+    slug = re.sub(r'[^a-z0-9]+', '-', clean_title.lower())[:60]
+    current_url = f"https://newnews4public.blogspot.com/{datetime.now().year}/{datetime.now().month}/{slug}.html"
+    
+    images_html = ""
+    for img in images:
+        images_html += f'<img src="{img["url"]}" style="width:100%; margin:20px 0; border-radius:12px;">'
+    
+    content_html = content.replace('\n\n', '</p><p>')
+    content_html = f'<p>{content_html}</p>'
+    content_html = content_html.replace('<p><h2>', '<h2>').replace('</h2></p>', '</h2>')
+    content_html = content_html.replace('[ENGLISH ARTICLE]', '<h2>📰 ENGLISH ARTICLE</h2>')
+    content_html = content_html.replace('[URDU TRANSLATION]', '<h2>🇵🇰 اردو ترجمہ</h2>')
+    
+    html = f'''<!DOCTYPE html>
+<html lang="ur">
+<head>
+    <title>{clean_title[:70]} | News Analysis</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {{ font-family: Georgia; max-width: 900px; margin: 0 auto; padding: 20px; line-height: 1.7; }}
+        h1 {{ font-size: 38px; }}
+        h2 {{ font-size: 28px; border-bottom: 2px solid #1a73e8; padding-bottom: 8px; margin: 40px 0 20px; }}
+        .meta {{ color: #666; font-size: 13px; margin-bottom: 25px; border-bottom: 1px solid #e0e0e0; padding-bottom: 15px; display: flex; justify-content: space-between; }}
+        p {{ text-align: justify; margin-bottom: 22px; }}
+        hr {{ margin: 40px 0; }}
+        @media (max-width: 600px) {{ body {{ padding: 15px; }} h1 {{ font-size: 28px; }} }}
+    </style>
+</head>
+<body>
+    <h1>{clean_title}</h1>
+    <div class="meta">
+        <span>📅 {current_date}</span>
+        <span>📖 {reading_time} min read</span>
+        <span>📰 {source}</span>
+    </div>
+    {images_html}
+    <div>{content_html}</div>
+    <hr>
+    <p style="text-align: center;">© {datetime.now().year} News Analysis</p>
+</body>
+</html>'''
+    
+    post = service.posts().insert(blogId=BLOG_ID, body={'title': clean_title[:70], 'content': html}, isDraft=False).execute()
+    print(f"   ✅ Published")
+    return post
+
+def run():
+    print("📰 BILINGUAL NEWS BOT (English + Urdu)")
+    articles = fetch_news()
+    if not articles:
+        print("No news")
+        return
+    
+    processed = load_processed()
+    
+    for a in articles:
+        pid = a['title'][:80]
+        if pid in processed:
+            continue
+        
+        print(f"\n📰 {a['title'][:60]}...")
+        images = get_images(a['title'])
+        content = write_bilingual_article(a['title'], a.get('description', ''), a['source'])
+        
+        service = google_login()
+        if service:
+            post_to_blogger(service, a['title'], content, images, a['source'])
+            processed.add(pid)
+            save_processed(processed)
+        break
+
+if __name__ == "__main__":
+    run()
