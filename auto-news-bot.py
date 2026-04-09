@@ -70,11 +70,6 @@ def fetch_news():
                 description = entry.get('summary', '')[:500]
                 description = re.sub(r'<[^>]+>', '', description)
                 
-                # Skip live/video updates
-                skip_words = ['live', 'update', 'watch', 'video', 'podcast']
-                if any(word in title.lower() for word in skip_words):
-                    continue
-                
                 if title and link and len(title) > 25:
                     story_id = title[:80]
                     if story_id not in processed:
@@ -129,8 +124,7 @@ def get_images(title):
     
     return images[:2]
 
-def write_human_article(title, description, source, retry=0):
-    """2000+ words humanised article"""
+def write_article(title, description, source, retry=0):
     current_date = datetime.now().strftime("%B %d, %Y")
     
     prompt = f"""Write a detailed, human-sounding news article.
@@ -142,15 +136,13 @@ CONTEXT: {description[:500]}
 
 REQUIREMENTS:
 - Write 2000+ words
-- Sound like a real journalist, not AI
-- Add realistic quotes from witnesses or experts
-- Use short paragraphs (2-4 sentences)
-- Start with a strong opening
-- End naturally
+- Sound like a real journalist
+- Add realistic quotes
+- Use short paragraphs
 - NO placeholders
-- NO generic phrases
+- Strong opening, natural ending
 
-Write the complete article now:"""
+Write now:"""
 
     try:
         print(f"   ✍️ Writing 2000+ word article...")
@@ -166,15 +158,14 @@ Write the complete article now:"""
         if word_count < 1000 and retry < 2:
             print(f"   ⚠️ Too short, retrying...")
             time.sleep(5)
-            return write_human_article(title, description, source, retry + 1)
+            return write_article(title, description, source, retry + 1)
         
         return article
-        
     except Exception as e:
         print(f"   ❌ Error: {e}")
         if retry < 2:
             time.sleep(5)
-            return write_human_article(title, description, source, retry + 1)
+            return write_article(title, description, source, retry + 1)
         return f"<p>{title}</p><p>{description}</p>"
 
 def post_to_blogger(service, title, content, images, source):
@@ -188,12 +179,11 @@ def post_to_blogger(service, title, content, images, source):
     
     images_html = ""
     for img in images:
-        images_html += f'<img src="{img["url"]}" style="width:100%; max-width:750px; margin:20px 0; border-radius:12px;">'
+        images_html += f'<img src="{img["url"]}" style="width:100%; margin:20px 0; border-radius:12px;">'
     
     content_html = content.replace('\n\n', '</p><p>')
     content_html = f'<p>{content_html}</p>'
     content_html = content_html.replace('<p><h2>', '<h2>').replace('</h2></p>', '</h2>')
-    content_html = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', content_html)
     
     html = f'''<!DOCTYPE html>
 <html>
@@ -204,13 +194,13 @@ def post_to_blogger(service, title, content, images, source):
     <meta name="description" content="{title[:160]}">
     <link rel="canonical" href="{current_url}">
     <style>
-        body {{ font-family: 'Georgia', 'Times New Roman', serif; max-width: 850px; margin: 0 auto; padding: 20px; line-height: 1.75; font-size: 18px; color: #1a1a1a; }}
+        body {{ font-family: 'Georgia', 'Times New Roman', serif; max-width: 850px; margin: 0 auto; padding: 20px; line-height: 1.75; font-size: 18px; }}
         h1 {{ font-size: 38px; margin-bottom: 15px; }}
         h2 {{ font-size: 28px; margin: 40px 0 20px 0; border-bottom: 2px solid #1a73e8; padding-bottom: 8px; }}
         .meta {{ color: #666; font-size: 13px; margin-bottom: 25px; border-bottom: 1px solid #e0e0e0; padding-bottom: 15px; display: flex; justify-content: space-between; }}
         p {{ text-align: justify; margin-bottom: 22px; line-height: 1.75; }}
         hr {{ margin: 40px 0; }}
-        @media (max-width: 600px) {{ body {{ padding: 15px; font-size: 16px; }} h1 {{ font-size: 28px; }} h2 {{ font-size: 22px; }} }}
+        @media (max-width: 600px) {{ body {{ padding: 15px; font-size: 16px; }} h1 {{ font-size: 28px; }} }}
     </style>
 </head>
 <body>
@@ -225,7 +215,7 @@ def post_to_blogger(service, title, content, images, source):
         {content_html}
     </div>
     <hr>
-    <p style="text-align: center; font-size: 12px;">© {datetime.now().year} News Analysis | In-Depth Coverage</p>
+    <p style="text-align: center; font-size: 12px;">© {datetime.now().year} News Analysis</p>
 </body>
 </html>'''
     
@@ -236,13 +226,12 @@ def post_to_blogger(service, title, content, images, source):
 def run():
     print("""
     ╔══════════════════════════════════════════════════════════════════════╗
-    ║         📰 GROQ NEWS BOT - 2000+ WORDS HUMANISED ARTICLES           ║
+    ║         📰 GROQ AI NEWS BOT - 2000+ WORDS HUMANISED                 ║
     ║                                                                      ║
     ║   ✓ 2000+ words per article                                         ║
     ║   ✓ Human-sounding, natural language                                ║
     ║   ✓ 2 images from Pexels                                            ║
     ║   ✓ Text justified                                                  ║
-    ║   ✓ NO credit card required                                         ║
     ╚══════════════════════════════════════════════════════════════════════╝
     """)
     
@@ -260,7 +249,7 @@ def run():
         
         print(f"\n📰 {a['title'][:60]}...")
         images = get_images(a['title'])
-        content = write_human_article(a['title'], a.get('description', ''), a['source'])
+        content = write_article(a['title'], a.get('description', ''), a['source'])
         
         service = google_login()
         if service:
