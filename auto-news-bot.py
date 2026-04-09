@@ -112,7 +112,7 @@ def get_images(title):
                 images.append({
                     'url': photo['src']['large'],
                     'alt': f"{title[:50]} - image {i+1}",
-                    'caption': f"{title[:60]} | Credit: {photo.get('photographer', 'Pexels')}",
+                    'caption': f"{title[:60]}",
                     'credit': photo.get('photographer', 'Pexels')
                 })
     except:
@@ -129,31 +129,39 @@ def get_images(title):
     return images[:2]
 
 def write_bilingual_article(title, description, source, retry=0):
+    """2000+ words English + Professional Urdu Translation"""
     current_date = datetime.now().strftime("%B %d, %Y")
     
-    prompt = f"""Write a COMPLETE bilingual news article.
+    prompt = f"""Write a professional bilingual news article.
 
 TITLE: {title}
 DATE: {current_date}
 SOURCE: {source}
 CONTEXT: {description[:500]}
 
-INSTRUCTIONS:
-1. FIRST write a COMPLETE English article of 1500-2000 words
-2. THEN write a COMPLETE Urdu translation
-3. Urdu translation must be 100% complete
+IMPORTANT RULES:
+1. English article: 1500-2000 words, newspaper style, short paragraphs (3-4 sentences each), natural quotes, strong opening.
+2. Urdu translation: Professional, fluent, natural Urdu. Use proper Urdu script. Match the English paragraph structure.
+3. Separate sections clearly.
 
-FORMAT:
-[ENGLISH ARTICLE]
-(complete English article)
+FORMAT (follow exactly):
 
-[URDU TRANSLATION]
-(complete Urdu translation)
+═══════════════════════════════════════
+ENGLISH VERSION
+═══════════════════════════════════════
+
+[Write 1500-2000 word English article here with proper paragraphs]
+
+═══════════════════════════════════════
+URDU VERSION (اردو ترجمہ)
+═══════════════════════════════════════
+
+[Write complete Urdu translation here. Use proper Urdu script. Match paragraph by paragraph.]
 
 Write now:"""
 
     try:
-        print(f"   ✍️ Writing bilingual article...")
+        print(f"   ✍️ Writing bilingual article (attempt {retry + 1})...")
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
@@ -161,19 +169,26 @@ Write now:"""
         )
         article = response.choices[0].message.content
         word_count = len(article.split())
-        print(f"   📊 {word_count} words")
+        print(f"   📊 Total words: {word_count}")
+        
+        # Check if Urdu section exists
+        if "URDU VERSION" not in article and "اردو" not in article and retry < 2:
+            print(f"   ⚠️ Urdu missing, retrying...")
+            time.sleep(5)
+            return write_bilingual_article(title, description, source, retry + 1)
+        
         return article
     except Exception as e:
         print(f"   ❌ Error: {e}")
         if retry < 2:
             time.sleep(5)
             return write_bilingual_article(title, description, source, retry + 1)
-        return f"<p>{title}</p><p>{description}</p>"
+        return f"<p><strong>{title}</strong></p><p>{description}</p>"
 
 def post_to_blogger(service, title, content, images, source):
     current_date = datetime.now().strftime("%B %d, %Y")
     word_count = len(content.split())
-    reading_time = max(12, round(word_count / 200))
+    reading_time = max(10, round(word_count / 200))
     clean_title = title.replace('<', '&lt;').replace('>', '&gt;')
     
     slug = re.sub(r'[^a-z0-9]+', '-', clean_title.lower())[:60]
@@ -181,71 +196,215 @@ def post_to_blogger(service, title, content, images, source):
     
     images_html = ""
     for img in images:
-        images_html += f'<img src="{img["url"]}" style="width:100%; margin:20px 0; border-radius:12px;">'
+        images_html += f'''
+        <figure style="text-align: center; margin: 25px 0;">
+            <img src="{img['url']}" alt="{img['alt'][:80]}" style="width:100%; max-width:750px; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.1);">
+            <figcaption style="font-size:12px; color:#666; margin-top:8px;">📷 {img['caption'][:80]} | Credit: {img['credit']}</figcaption>
+        </figure>
+        '''
     
+    # Convert newlines to paragraphs
     content_html = content.replace('\n\n', '</p><p>')
     content_html = f'<p>{content_html}</p>'
     content_html = content_html.replace('<p><h2>', '<h2>').replace('</h2></p>', '</h2>')
-    content_html = content_html.replace('[ENGLISH ARTICLE]', '<h2>📰 ENGLISH ARTICLE</h2>')
-    content_html = content_html.replace('[URDU TRANSLATION]', '<h2>🇵🇰 اردو ترجمہ</h2>')
+    
+    # Add badges for language sections
+    content_html = content_html.replace('═══════════════════════════════════════', '<hr class="section-divider">')
+    content_html = content_html.replace('ENGLISH VERSION', '<h2 class="lang-english">📰 ENGLISH VERSION</h2>')
+    content_html = content_html.replace('URDU VERSION (اردو ترجمہ)', '<h2 class="lang-urdu">🇵🇰 اردو ترجمہ</h2>')
     
     html = f'''<!DOCTYPE html>
 <html lang="ur">
 <head>
-    <title>{clean_title[:70]} | News Analysis</title>
+    <title>{clean_title[:70]} | News Analysis (English + Urdu)</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="{title[:160]} - Complete coverage in English and Urdu">
+    <link rel="canonical" href="{current_url}">
     <style>
-        body {{ font-family: Georgia; max-width: 900px; margin: 0 auto; padding: 20px; line-height: 1.7; }}
-        h1 {{ font-size: 38px; }}
-        h2 {{ font-size: 28px; border-bottom: 2px solid #1a73e8; padding-bottom: 8px; margin: 40px 0 20px; }}
-        .meta {{ color: #666; font-size: 13px; margin-bottom: 25px; border-bottom: 1px solid #e0e0e0; padding-bottom: 15px; display: flex; justify-content: space-between; }}
-        p {{ text-align: justify; margin-bottom: 22px; }}
-        hr {{ margin: 40px 0; }}
-        @media (max-width: 600px) {{ body {{ padding: 15px; }} h1 {{ font-size: 28px; }} }}
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ 
+            font-family: 'Georgia', 'Times New Roman', 'Arial', sans-serif; 
+            max-width: 880px; 
+            margin: 0 auto; 
+            padding: 25px; 
+            line-height: 1.8; 
+            font-size: 18px; 
+            color: #1a1a1a; 
+            background: #fff;
+        }}
+        h1 {{ 
+            font-size: 38px; 
+            line-height: 1.3; 
+            margin-bottom: 15px; 
+            color: #000; 
+            font-weight: bold;
+        }}
+        h2 {{ 
+            font-size: 26px; 
+            margin: 40px 0 20px 0; 
+            padding-bottom: 10px; 
+            color: #000; 
+        }}
+        h2.lang-english {{ 
+            border-bottom: 3px solid #1a73e8; 
+            background: #f0f7ff; 
+            padding: 12px 15px; 
+            border-radius: 8px;
+        }}
+        h2.lang-urdu {{ 
+            border-bottom: 3px solid #2e7d32; 
+            background: #f1f8e9; 
+            padding: 12px 15px; 
+            border-radius: 8px;
+            font-family: 'Noto Nastaliq Urdu', 'Jameel Noori Nastaleeq', serif;
+            direction: rtl;
+            text-align: right;
+        }}
+        .meta {{ 
+            color: #666; 
+            font-size: 13px; 
+            margin-bottom: 25px; 
+            padding-bottom: 15px; 
+            border-bottom: 1px solid #e0e0e0; 
+            display: flex; 
+            justify-content: space-between; 
+            flex-wrap: wrap; 
+        }}
+        .article-content p {{ 
+            margin-bottom: 22px; 
+            text-align: justify; 
+            line-height: 1.8; 
+        }}
+        .article-content .urdu-text {{
+            font-family: 'Noto Nastaliq Urdu', 'Jameel Noori Nastaleeq', serif;
+            font-size: 20px;
+            line-height: 2;
+            direction: rtl;
+            text-align: right;
+        }}
+        hr.section-divider {{
+            margin: 40px 0;
+            border: none;
+            height: 2px;
+            background: linear-gradient(to right, transparent, #1a73e8, #2e7d32, transparent);
+        }}
+        hr {{
+            margin: 40px 0;
+            border: none;
+            height: 1px;
+            background: #e0e0e0;
+        }}
+        figure {{
+            margin: 25px 0;
+        }}
+        figcaption {{
+            font-size: 12px;
+            color: #666;
+            text-align: center;
+            margin-top: 8px;
+        }}
+        @media (max-width: 600px) {{ 
+            body {{ padding: 15px; font-size: 16px; }} 
+            h1 {{ font-size: 28px; }} 
+            h2 {{ font-size: 22px; }}
+            .article-content .urdu-text {{ font-size: 18px; }}
+        }}
     </style>
 </head>
 <body>
-    <h1>{clean_title}</h1>
-    <div class="meta">
-        <span>📅 {current_date}</span>
-        <span>📖 {reading_time} min read</span>
-        <span>📰 {source}</span>
+
+<h1>{clean_title}</h1>
+
+<div class="meta">
+    <span>📅 {current_date}</span>
+    <span>📖 {reading_time} min read</span>
+    <span>📰 {source}</span>
+    <span>🇬🇧 English | 🇵🇰 اردو</span>
+</div>
+
+{images_html}
+
+<div class="article-content">
+    {content_html}
+</div>
+
+<hr>
+
+<div style="text-align: center; margin: 30px 0;">
+    <div style="display: flex; justify-content: center; gap: 12px; flex-wrap: wrap;">
+        <a href="https://twitter.com/intent/tweet?text={quote(clean_title[:70])}&url={quote(current_url)}" target="_blank" style="background:#1DA1F2; color:white; padding:10px 20px; border-radius:30px; text-decoration:none;">🐦 Share</a>
+        <a href="https://www.facebook.com/sharer/sharer.php?u={quote(current_url)}" target="_blank" style="background:#4267B2; color:white; padding:10px 20px; border-radius:30px; text-decoration:none;">📘 Share</a>
+        <a href="https://wa.me/?text={quote(clean_title[:50] + ' ' + current_url)}" target="_blank" style="background:#25D366; color:white; padding:10px 20px; border-radius:30px; text-decoration:none;">💬 Share</a>
     </div>
-    {images_html}
-    <div>{content_html}</div>
-    <hr>
-    <p style="text-align: center;">© {datetime.now().year} News Analysis</p>
+</div>
+
+<div style="text-align: center; font-size: 12px; color: #999;">
+    <p>© {datetime.now().year} News Analysis | Bilingual Coverage (English + Urdu)</p>
+</div>
+
 </body>
 </html>'''
     
-    post = service.posts().insert(blogId=BLOG_ID, body={'title': clean_title[:70], 'content': html}, isDraft=False).execute()
-    print(f"   ✅ Published")
+    post = service.posts().insert(
+        blogId=BLOG_ID,
+        body={'title': clean_title[:70], 'content': html},
+        isDraft=False
+    ).execute()
+    print(f"   ✅ Published: {post.get('url')}")
     return post
 
 def run():
-    print("📰 BILINGUAL NEWS BOT (English + Urdu)")
+    print("""
+    ╔══════════════════════════════════════════════════════════════════════════════╗
+    ║         📰 BILINGUAL NEWS BOT - PROFESSIONAL URDU TRANSLATION               ║
+    ║                                                                            ║
+    ║   ✓ 1500-2000 words English article                                        ║
+    ║   ✓ Professional, fluent Urdu translation                                  ║
+    ║   ✓ Proper paragraph structure                                             ║
+    ║   ✓ 2 images from Pexels                                                   ║
+    ║   ✓ Text justified | RTL support for Urdu                                  ║
+    ╚══════════════════════════════════════════════════════════════════════════════╝
+    """)
+    
+    print("✅ Bot is RUNNING")
+    print("📝 Writing bilingual articles (English + Professional Urdu)\n")
+    
     articles = fetch_news()
     if not articles:
-        print("No news")
+        print("📭 No new stories found")
         return
     
     processed = load_processed()
     
-    for a in articles:
-        pid = a['title'][:80]
-        if pid in processed:
+    for article in articles:
+        story_id = article['title'][:80]
+        if story_id in processed:
+            print(f"   ⏭️ Already posted: {article['title'][:50]}...")
             continue
         
-        print(f"\n📰 {a['title'][:60]}...")
-        images = get_images(a['title'])
-        content = write_bilingual_article(a['title'], a.get('description', ''), a['source'])
+        print(f"\n📰 {article['title'][:70]}...")
+        print(f"   Source: {article['source']}")
+        
+        print(f"   🖼️ Getting images...")
+        images = get_images(article['title'])
+        print(f"   ✅ {len(images)} images ready")
+        
+        print(f"   ✍️ Writing bilingual article (English + Professional Urdu)...")
+        content = write_bilingual_article(article['title'], article.get('description', ''), article['source'])
+        
+        word_count = len(content.split())
+        print(f"   📝 Total word count: {word_count} words")
         
         service = google_login()
         if service:
-            post_to_blogger(service, a['title'], content, images, a['source'])
-            processed.add(pid)
+            post_to_blogger(service, article['title'], content, images, article['source'])
+            processed.add(story_id)
             save_processed(processed)
+            print(f"   ✅ Published successfully!")
+        else:
+            print(f"   ❌ Failed to login to Blogger")
+        
         break
 
 if __name__ == "__main__":
