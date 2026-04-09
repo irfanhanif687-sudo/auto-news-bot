@@ -62,21 +62,14 @@ def fetch_news():
             feed = feedparser.parse(feed_url)
             source_name = feed.feed.get('title', 'Unknown')[:30]
             
-            for entry in feed.entries[:5]:
+            for entry in feed.entries[:3]:
                 title = entry.get('title', '').strip()
                 link = entry.get('link', '')
                 description = entry.get('summary', '')[:500]
                 description = re.sub(r'<[^>]+>', '', description)
                 
-                # Skip unwanted topics (live updates, videos, etc.)
-                skip_words = ['live', 'update', 'watch', 'video', 'podcast', 'BTS', 'K-pop', 'Moo Deng']
-                if any(word in title.lower() for word in skip_words):
-                    print(f"      ⏭️ Skipping: {title[:40]}...")
-                    continue
-                
                 if title and link and len(title) > 25:
-                    # Use link as story_id for better uniqueness
-                    story_id = link[:80]
+                    story_id = title[:80]
                     if story_id not in processed:
                         articles.append({
                             'title': title,
@@ -87,7 +80,6 @@ def fetch_news():
         except Exception as e:
             print(f"      ⚠️ Error: {e}")
     
-    # Remove duplicates by title
     seen = set()
     unique = []
     for a in articles:
@@ -96,7 +88,7 @@ def fetch_news():
             unique.append(a)
     
     print(f"   ✅ Found {len(unique)} new stories")
-    return unique[:2]  # 2 posts per run
+    return unique[:1]
 
 def get_images(title):
     images = []
@@ -151,7 +143,7 @@ REQUIREMENTS:
 Write the complete article now:"""
 
     try:
-        print(f"   ✍️ Writing article via OpenRouter...")
+        print(f"   ✍️ Writing article via OpenRouter (Gemini 2.0 Flash)...")
         
         response = requests.post(
             url="https://openrouter.ai/api/v1/chat/completions",
@@ -160,7 +152,7 @@ Write the complete article now:"""
                 "Content-Type": "application/json",
             },
             json={
-                "model": "meta-llama/llama-4-maverick:free",
+                "model": "google/gemini-2.0-flash-exp:free",  # Changed model
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.7,
                 "max_tokens": 8000,
@@ -181,6 +173,7 @@ Write the complete article now:"""
             return article
         else:
             print(f"   ❌ API Error: {response.status_code}")
+            print(f"   Response: {response.text[:200]}")
             if retry < 2:
                 time.sleep(5)
                 return write_article(title, description, source, retry + 1)
@@ -254,60 +247,41 @@ def post_to_blogger(service, title, content, images, source):
 def run():
     print("""
     ╔══════════════════════════════════════════════════════════════════════╗
-    ║      📰 OPENROUTER NEWS BOT - 1500+ WORDS | FREE | WORKING          ║
+    ║      📰 OPENROUTER NEWS BOT - GEMINI 2.0 FLASH                      ║
     ║                                                                      ║
-    ║   ✓ Llama 4 Maverick (Meta's best free model)                       ║
+    ║   ✓ Gemini 2.0 Flash (fast & reliable)                              ║
     ║   ✓ 1500-2000 words humanised articles                              ║
     ║   ✓ 2 images from Pexels                                            ║
     ║   ✓ Text justified | No errors                                      ║
     ║   ✓ NO credit card required                                         ║
-    ║   ✓ 2 posts per run (if available)                                  ║
     ╚══════════════════════════════════════════════════════════════════════╝
     """)
     
     print("✅ Bot is RUNNING")
-    print("📝 Writing articles via Llama 4\n")
+    print("📝 Writing articles via Gemini 2.0 Flash\n")
     
     articles = fetch_news()
     if not articles:
-        print("📭 No new stories found")
+        print("📭 No new stories")
         return
     
     processed = load_processed()
-    published = 0
     
-    for article in articles:
-        story_id = article['url'][:80]  # Use URL as ID
-        if story_id in processed:
-            print(f"   ⏭️ Already posted: {article['title'][:50]}...")
+    for a in articles:
+        pid = a['title'][:80]
+        if pid in processed:
             continue
         
-        print(f"\n📰 {article['title'][:70]}...")
-        print(f"   Source: {article['source']}")
-        
-        print(f"   🖼️ Getting images...")
-        images = get_images(article['title'])
-        print(f"   ✅ {len(images)} images ready")
-        
-        print(f"   ✍️ Writing article...")
-        content = write_article(article['title'], article.get('description', ''), article['source'])
-        
-        word_count = len(content.split())
-        print(f"   📝 Final word count: {word_count} words")
+        print(f"\n📰 {a['title'][:60]}...")
+        images = get_images(a['title'])
+        content = write_article(a['title'], a.get('description', ''), a['source'])
         
         service = google_login()
         if service:
-            post_to_blogger(service, article['title'], content, images, article['source'])
-            processed.add(story_id)
+            post_to_blogger(service, a['title'], content, images, a['source'])
+            processed.add(pid)
             save_processed(processed)
-            published += 1
-            print(f"   ✅ Published ({published}/{len(articles)})")
-        else:
-            print(f"   ❌ Failed to login to Blogger")
-        
-        time.sleep(10)  # Delay between posts
-    
-    print(f"\n📊 Published {published} new articles this run")
+        break
 
 if __name__ == "__main__":
     run()
